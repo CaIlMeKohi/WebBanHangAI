@@ -5,14 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:api": "py backend/manage.py runserver",
+    "dev:api": "cd ../backend && py manage.py runserver",
     "dev:django": "concurrently \"npm:dev\" \"npm:dev:api\"",
-    "makemigrations:api": "py backend/manage.py makemigrations products",
-    "migrate:api": "py backend/manage.py migrate",
-    "seed:api": "py backend/manage.py seed_products",
+    "makemigrations:api": "cd ../backend && py manage.py makemigrations products",
+    "migrate:api": "cd ../backend && py manage.py migrate",
+    "seed:api": "cd ../backend && py manage.py seed_products",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "collectstatic": "py backend/manage.py collectstatic --noinput"
+    "collectstatic": "cd ../backend && py manage.py collectstatic --noinput"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

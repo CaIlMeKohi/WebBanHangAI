@@ -8,15 +8,18 @@ import {
   X,
   Moon,
   Sun,
+  LogOut,
 } from "lucide-react";
 import { useState } from "react";
 import { useTheme } from "next-themes";
+import { useAdminAuth } from "../context/AdminAuthContext";
 
 export function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
+  const { isLoggedIn, username, logout, role } = useAdminAuth();
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,6 +27,12 @@ export function Navbar() {
       navigate(`/shop?search=${encodeURIComponent(searchQuery)}`);
       setSearchQuery("");
     }
+  };
+
+  const handleLogout = () => {
+    logout();
+    setIsMenuOpen(false);
+    navigate("/login");
   };
 
   return (
@@ -103,7 +112,7 @@ export function Navbar() {
               )}
             </button>
             <Link
-              to="/profile"
+              to={isLoggedIn ? "/profile" : "/login"}
               className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full transition-colors"
             >
               <User className="w-5 h-5" />
@@ -123,6 +132,36 @@ export function Navbar() {
                 3
               </span>
             </Link>
+            {isLoggedIn ? (
+              <div className="hidden md:flex items-center gap-3">
+                <span className="px-3 py-1 rounded-full bg-neutral-100 dark:bg-neutral-800 text-sm text-neutral-900 dark:text-neutral-100">
+                  {username}
+                  {role ? ` · ${role}` : ""}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-3 py-2 rounded-full bg-neutral-900 text-white text-sm hover:bg-neutral-800 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <div className="hidden md:flex items-center gap-2">
+                <Link
+                  to="/login"
+                  className="px-3 py-2 rounded-full text-sm border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+                >
+                  Đăng nhập
+                </Link>
+                <Link
+                  to="/register"
+                  className="px-3 py-2 rounded-full text-sm bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+                >
+                  Đăng ký
+                </Link>
+              </div>
+            )}
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="md:hidden p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full transition-colors"
@@ -189,6 +228,40 @@ export function Navbar() {
             >
               GIẢM GIÁ
             </Link>
+            <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 space-y-2">
+              {isLoggedIn ? (
+                <>
+                  <div className="px-1 text-sm text-neutral-600 dark:text-neutral-400">
+                    {username}
+                    {role ? ` · ${role}` : ""}
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-neutral-900 text-white"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/login"
+                    className="block py-2 text-sm tracking-wide hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Đăng nhập
+                  </Link>
+                  <Link
+                    to="/register"
+                    className="block py-2 text-sm tracking-wide hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+                    onClick={() => setIsMenuOpen(false)}
+                  >
+                    Đăng ký
+                  </Link>
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -1,115 +1,69 @@
 from datetime import timedelta
 
-from django.db.models import Count, Prefetch, Q
-from django.db.models.functions import Coalesce
+from django.db.models import Q
 from django.utils import timezone
-from rest_framework import generics
+from rest_framework import generics, status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 
-from .models import Category, Product, UserInteraction
-from .serializers import CategorySerializer, ProductSerializer, UserProductEventSerializer
-
-
-def _parse_int(raw: str | None) -> int | None:
-    if raw in {None, ''}:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
-def _parse_list_param(query_params, key: str) -> list[str]:
-    values: list[str] = []
-    for raw_value in query_params.getlist(key):
-        for item in raw_value.split(','):
-            value = item.strip()
-            if value:
-                values.append(value)
-    return values
-
-
-def _catalog_queryset():
-    return (
-        Product.objects.filter(is_active=True)
-        .select_related('brand', 'category', 'category__parent')
-        .prefetch_related('images', 'variants')
-        .annotate(
-            effective_price=Coalesce('sale_price', 'price'),
-            interaction_count=Count('interactions', distinct=True),
-        )
-    )
-
-
-class CategoryListAPIView(generics.ListAPIView):
-    serializer_class = CategorySerializer
-
-    def get_queryset(self):
-        child_queryset = (
-            Category.objects.filter(parent__isnull=False)
-            .select_related('parent')
-            .annotate(product_count=Count('products', filter=Q(products__is_active=True), distinct=True))
-            .order_by('name')
-        )
-
-        return (
-            Category.objects.filter(parent__isnull=True)
-            .annotate(product_count=Count('products', filter=Q(products__is_active=True), distinct=True))
-            .prefetch_related(Prefetch('children', queryset=child_queryset))
-            .order_by('name')
-        )
+from .models import Product, ProductImage, ProductVariant, Category, Brand, UserInteraction
+from .serializers import ProductSerializer, UserProductEventSerializer, ProductAdminSerializer
 
 
 class ProductListAPIView(generics.ListAPIView):
     serializer_class = ProductSerializer
 
     def get_queryset(self):
-        queryset = _catalog_queryset()
+        queryset = Product.objects.filter(is_active=True).select_related('category', 'brand').prefetch_related('images', 'variants', 'category__children', 'interactions')
 
         category = self.request.query_params.get('category')
         is_new = self.request.query_params.get('new')
         is_sale = self.request.query_params.get('sale')
-        search = (self.request.query_params.get('search') or '').strip()
-        subcategories = _parse_list_param(self.request.query_params, 'subcategory')
-        min_price = _parse_int(self.request.query_params.get('min_price'))
-        max_price = _parse_int(self.request.query_params.get('max_price'))
-        sort = self.request.query_params.get('sort')
+        search = self.request.query_params.get('search')
+        subcategories = self.request.query_params.getlist('subcategory')
 
         if category:
             queryset = queryset.filter(Q(category__slug=category) | Q(category__parent__slug=category))
         if is_new in {'true', '1'}:
-            recent_threshold = timezone.now() - timedelta(days=30)
-            queryset = queryset.filter(Q(is_new=True) | Q(created_at__gte=recent_threshold))
+            queryset = queryset.filter(created_at__gte=timezone.now() - timedelta(days=30))
         if is_sale in {'true', '1'}:
             queryset = queryset.filter(sale_price__isnull=False)
         if search:
-            queryset = queryset.filter(
-                Q(name__icontains=search)
-                | Q(description__icontains=search)
-                | Q(feature_text__icontains=search)
-            )
+            queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search) | Q(feature_text__icontains=search))
         if subcategories:
             queryset = queryset.filter(category__slug__in=subcategories)
-        if min_price is not None:
-            queryset = queryset.filter(effective_price__gte=min_price)
-        if max_price is not None:
-            queryset = queryset.filter(effective_price__lte=max_price)
 
-        ordering_map = {
-            'price_asc': ['effective_price', '-created_at'],
-            'price_desc': ['-effective_price', '-created_at'],
-            'newest': ['-created_at'],
-            'oldest': ['created_at'],
-        }
-        ordering = ordering_map.get(sort, ['-created_at'])
-
-        return queryset.order_by(*ordering)
+        return queryset
 
 
 class ProductDetailAPIView(generics.RetrieveAPIView):
-    queryset = _catalog_queryset()
+    queryset = Product.objects.filter(is_active=True).select_related('category', 'brand').prefetch_related('images', 'variants', 'category__children', 'interactions')
     serializer_class = ProductSerializer
     lookup_field = 'product_id'
     lookup_url_kwarg = 'id'
+
+
+class ProductAdminListCreateAPIView(generics.ListCreateAPIView):
+    """Admin: List all products (including inactive) and create new ones"""
+    queryset = Product.objects.all().select_related('category', 'brand').prefetch_related('images', 'variants')
+    serializer_class = ProductAdminSerializer
+    permission_classes = []  # TODO: Add IsAdminUser check in production
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+class ProductAdminUpdateDeleteAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """Admin: Update or delete a specific product"""
+    queryset = Product.objects.all()
+    serializer_class = ProductAdminSerializer
+    lookup_field = 'product_id'
+    lookup_url_kwarg = 'id'
+    permission_classes = []  # TODO: Add IsAdminUser check in production
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
 
 
 class UserEventCreateAPIView(generics.CreateAPIView):

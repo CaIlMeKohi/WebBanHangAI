@@ -1,35 +1,14 @@
 from datetime import timedelta
+from pathlib import Path
+from uuid import uuid4
 
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Category, Product, UserInteraction
-
-
-class CategoryChildSerializer(serializers.ModelSerializer):
-    id = serializers.IntegerField(source='category_id', read_only=True)
-    parentSlug = serializers.SerializerMethodField()
-    productCount = serializers.IntegerField(source='product_count', read_only=True)
-
-    def get_parentSlug(self, obj: Category) -> str | None:
-        return obj.parent.slug if obj.parent_id and obj.parent else None
-
-    class Meta:
-        model = Category
-        fields = ['id', 'slug', 'name', 'parentSlug', 'productCount']
-
-
-class CategorySerializer(CategoryChildSerializer):
-    children = CategoryChildSerializer(many=True, read_only=True)
-    productCount = serializers.SerializerMethodField()
-
-    def get_productCount(self, obj: Category) -> int:
-        direct_count = getattr(obj, 'product_count', 0)
-        child_count = sum(getattr(child, 'product_count', 0) for child in obj.children.all())
-        return direct_count + child_count
-
-    class Meta(CategoryChildSerializer.Meta):
-        fields = ['id', 'slug', 'name', 'parentSlug', 'productCount', 'children']
+from .models import Product, UserInteraction, Category, Brand, ProductImage, ProductVariant
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -37,11 +16,8 @@ class ProductSerializer(serializers.ModelSerializer):
     price = serializers.SerializerMethodField()
     originalPrice = serializers.SerializerMethodField()
     image = serializers.SerializerMethodField()
-    images = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
-    categoryName = serializers.SerializerMethodField()
     subcategory = serializers.SerializerMethodField()
-    subcategoryName = serializers.SerializerMethodField()
     rating = serializers.FloatField(source='average_rating')
     reviews = serializers.IntegerField(source='num_reviews')
     colors = serializers.SerializerMethodField()
@@ -49,64 +25,36 @@ class ProductSerializer(serializers.ModelSerializer):
     isNew = serializers.SerializerMethodField()
     isBestSeller = serializers.SerializerMethodField()
     isTrending = serializers.SerializerMethodField()
-    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
-    brandName = serializers.SerializerMethodField()
-    stockQuantity = serializers.IntegerField(source='stock_quantity', read_only=True)
-
-    def _get_image_objects(self, obj: Product) -> list:
-        return list(obj.images.all())
-
-    def _get_effective_price(self, obj: Product) -> int:
-        effective_price = getattr(obj, 'effective_price', None)
-        if effective_price is not None:
-            return int(effective_price)
-        return obj.sale_price if obj.sale_price is not None else obj.price
-
-    def _is_recent_product(self, obj: Product) -> bool:
-        return obj.created_at >= timezone.now() - timedelta(days=30)
-
-    def _get_top_level_category(self, obj: Product) -> Category:
-        return obj.category.parent if obj.category.parent_id and obj.category.parent else obj.category
 
     def get_id(self, obj: Product) -> str:
         return str(obj.product_id)
 
     def get_price(self, obj: Product) -> int:
-        return self._get_effective_price(obj)
+        return obj.sale_price if obj.sale_price is not None else obj.price
 
-    def get_originalPrice(self, obj: Product) -> int | None:
+    def get_originalPrice(self, obj: Product):
         return obj.price if obj.sale_price is not None else None
 
     def get_image(self, obj: Product) -> str:
-        images = self._get_image_objects(obj)
-        primary = next((image for image in images if image.is_primary), None)
+        primary = obj.images.filter(is_primary=True).first()
         if primary:
             return primary.image_url
-        if images:
-            return images[0].image_url
-        return ''
-
-    def get_images(self, obj: Product) -> list[str]:
-        images = self._get_image_objects(obj)
-        ordered = sorted(images, key=lambda image: (not image.is_primary, image.image_id))
-        return [image.image_url for image in ordered]
+        fallback = obj.images.first()
+        return fallback.image_url if fallback else ''
 
     def get_category(self, obj: Product) -> str:
-        return self._get_top_level_category(obj).slug
-
-    def get_categoryName(self, obj: Product) -> str:
-        return self._get_top_level_category(obj).name
+        if obj.category.parent_id:
+            return obj.category.parent.slug
+        return obj.category.slug
 
     def get_subcategory(self, obj: Product) -> str:
         if obj.category.parent_id:
             return obj.category.slug
-        return obj.category.slug
-
-    def get_subcategoryName(self, obj: Product) -> str:
-        return obj.category.name
+        child = obj.category.children.first()
+        return child.slug if child else obj.category.slug
 
     def get_colors(self, obj: Product) -> list[str]:
-        colors: list[str] = []
+        colors = []
         for variant in obj.variants.all():
             color = variant.variant_attributes.get('color')
             if color and color not in colors:
@@ -114,7 +62,7 @@ class ProductSerializer(serializers.ModelSerializer):
         return colors or ['Mac dinh']
 
     def get_sizes(self, obj: Product) -> list[str]:
-        sizes: list[str] = []
+        sizes = []
         for variant in obj.variants.all():
             size = variant.variant_attributes.get('size')
             if size and size not in sizes:
@@ -122,34 +70,24 @@ class ProductSerializer(serializers.ModelSerializer):
         return sizes or ['STD']
 
     def get_isNew(self, obj: Product) -> bool:
-        return bool(obj.is_new) or self._is_recent_product(obj)
+        return obj.created_at >= timezone.now() - timedelta(days=30)
 
     def get_isBestSeller(self, obj: Product) -> bool:
         return obj.num_reviews >= 150
 
     def get_isTrending(self, obj: Product) -> bool:
-        interaction_count = getattr(obj, 'interaction_count', None)
-        if interaction_count is None:
-            interaction_count = obj.interactions.count()
-        return interaction_count >= 10
-
-    def get_brandName(self, obj: Product) -> str | None:
-        return obj.brand.name if obj.brand_id and obj.brand else None
+        return obj.interactions.count() >= 10
 
     class Meta:
         model = Product
         fields = [
             'id',
-            'slug',
             'name',
             'price',
             'originalPrice',
             'image',
-            'images',
             'category',
-            'categoryName',
             'subcategory',
-            'subcategoryName',
             'rating',
             'reviews',
             'colors',
@@ -158,10 +96,89 @@ class ProductSerializer(serializers.ModelSerializer):
             'isNew',
             'isBestSeller',
             'isTrending',
-            'createdAt',
-            'brandName',
-            'stockQuantity',
         ]
+
+
+class ProductAdminSerializer(serializers.ModelSerializer):
+    """Serializer for admin CRUD operations (create/update/delete)"""
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=Category.objects.all(),
+        source='category',
+        write_only=True
+    )
+    brand_id = serializers.PrimaryKeyRelatedField(
+        queryset=Brand.objects.all(),
+        source='brand',
+        allow_null=True,
+        write_only=True
+    )
+    image_url = serializers.CharField(max_length=500, write_only=True, required=False)
+    image_file = serializers.FileField(write_only=True, required=False, allow_null=True)
+
+    class Meta:
+        model = Product
+        fields = [
+            'product_id',
+            'name',
+            'slug',
+            'description',
+            'price',
+            'sale_price',
+            'stock_quantity',
+            'category_id',
+            'brand_id',
+            'average_rating',
+            'num_reviews',
+            'feature_text',
+            'is_active',
+            'image_url',
+            'image_file',
+        ]
+        read_only_fields = ['product_id']
+
+    def _store_uploaded_image(self, uploaded_file) -> str:
+        file_extension = Path(uploaded_file.name).suffix or '.jpg'
+        storage_path = f'uploads/products/{uuid4().hex}{file_extension}'
+        saved_path = default_storage.save(storage_path, ContentFile(uploaded_file.read()))
+        return default_storage.url(saved_path)
+
+    def create(self, validated_data):
+        image_url = validated_data.pop('image_url', None)
+        image_file = validated_data.pop('image_file', None)
+        product = Product.objects.create(**validated_data)
+        
+        if image_file is not None:
+            image_url = self._store_uploaded_image(image_file)
+
+        if image_url:
+            ProductImage.objects.create(
+                product=product,
+                image_url=image_url,
+                is_primary=True
+            )
+        
+        return product
+
+    def update(self, instance, validated_data):
+        image_url = validated_data.pop('image_url', None)
+        image_file = validated_data.pop('image_file', None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if image_file is not None:
+            image_url = self._store_uploaded_image(image_file)
+
+        if image_url:
+            instance.images.filter(is_primary=True).delete()
+            ProductImage.objects.create(
+                product=instance,
+                image_url=image_url,
+                is_primary=True
+            )
+        
+        return instance
 
 
 class UserProductEventSerializer(serializers.ModelSerializer):

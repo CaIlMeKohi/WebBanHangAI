@@ -57,7 +57,7 @@ DATABASES = {
         'ENGINE': 'mssql',
         'NAME': os.getenv('SQLSERVER_DATABASE', 'webbanhang_db'),
         'USER': os.getenv('SQLSERVER_USER', 'sa'),
-        'PASSWORD': os.getenv('SQLSERVER_PASSWORD', '123'),
+        'PASSWORD': os.getenv('SQLSERVER_PASSWORD', ''),
         'HOST': os.getenv('SQLSERVER_HOST', '127.0.0.1'),
         'PORT': os.getenv('SQLSERVER_PORT', '1433'),
         'OPTIONS': {
@@ -80,6 +80,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
