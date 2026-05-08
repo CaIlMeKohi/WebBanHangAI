@@ -1,0 +1,108 @@
+PHÂN CÔNG CÔNG VIỆC (3 NGƯỜI) - BẢN CÂN CHỈNH KHỐI LƯỢNG
+
+============================================================
+Quân
+============================================================
+Phạm vi chính:
+- Hiển thị danh sách sản phẩm
+- Tìm kiếm sản phẩm
+- Lọc sản phẩm (giá, danh mục)
+- Sắp xếp sản phẩm (giá tăng/giảm, mới nhất)
+- Xem chi tiết sản phẩm
+
+Backend (A):
+- API lấy danh sách sản phẩm
+- API tìm kiếm/lọc/sắp xếp (mức cơ bản)
+
+Database (A):
+- Thiết kế/chuẩn hóa bảng sản phẩm: products, product_images, categories (mức cơ bản).
+- Viết migration cho các cột phục vụ lọc/sắp xếp: price, is_new, created_at, category_id.
+- Seed dữ liệu sản phẩm mẫu ban đầu để FE/BE test chung.
+- Tạo index cơ bản cho truy vấn danh sách: (category_id), (price), (created_at).
+
+Frontend (A):
+- ProductCard: hoàn thiện chức năng nút "THÊM NHANH" (hiện đang để trống logic).
+- ProductCard: lưu trạng thái yêu thích (hiện chỉ đổi icon local, chưa lưu/persist).
+- Product Detail: nút "THÊM VÀO GIỎ" hiện chỉ điều hướng /cart, cần thêm logic add item thật.
+- Product Detail: nút "MUA NGAY" hiện chưa có xử lý, cần tạo flow mua ngay.
+- Product Detail: validate bắt buộc chọn màu/size trước khi thêm giỏ hoặc mua ngay.
+- Product Detail: nút "Xem thêm đánh giá" hiện chưa có chức năng, thêm load thêm hoặc chuyển trang đánh giá.
+
+============================================================
+Bảo
+============================================================
+Phạm vi chính:
+- Thêm sản phẩm vào giỏ hàng
+- Xoá/cập nhật số lượng sản phẩm
+- Hiển thị giỏ hàng
+- Tính tổng tiền
+- Đặt hàng (checkout)
+
+Backend (B):
+- API giỏ hàng (thêm, xoá, sửa)
+- API tạo đơn hàng
+- Xử lý logic tính tiền
+
+Database (B):
+- Thiết kế bảng nghiệp vụ giỏ hàng/đơn hàng: carts, cart_items, orders, order_items.
+- Viết migration ràng buộc khóa ngoại và quy tắc toàn vẹn dữ liệu giữa cart/order/product/user.
+- Bổ sung cột snapshot giá tại thời điểm đặt hàng trong order_items để không lệ thuộc giá hiện tại.
+- Tạo index cho truy vấn checkout và lịch sử đơn gần nhất: (user_id, created_at), (order_id), (cart_id).
+- Seed dữ liệu test cho luồng thêm giỏ -> checkout -> tạo đơn.
+
+Frontend (B):
+- Cart page: bỏ dữ liệu mock, đọc dữ liệu giỏ hàng từ state chung/API/local storage chuẩn.
+- Cart page: đồng bộ số lượng/xóa sản phẩm với backend hoặc store thay vì chỉ state local tạm.
+- Cart page: xử lý trường hợp item hết hàng/không hợp lệ khi cập nhật số lượng.
+- Checkout button: hiện chưa có flow, cần điều hướng sang trang checkout thực.
+- Checkout page: hoàn thiện form checkout (địa chỉ, người nhận, phương thức giao hàng, phương thức thanh toán).
+- Checkout page: validate form và hiển thị lỗi theo field (form có nhưng thiếu xử lý hoàn chỉnh).
+- Checkout page: submit tạo đơn thực, hiển thị trạng thái thành công/thất bại.
+
+
+============================================================
+Khôi
+============================================================
+Phạm vi chính:
+- Đăng ký/đăng nhập
+- Xem và chỉnh sửa thông tin cá nhân
+- Lịch sử đơn hàng
+- Trạng thái đơn hàng (pending/confirmed/cancelled)
+- Gợi ý sản phẩm (rule-based/AI cơ bản)
+- Giả lập thanh toán nâng cao (callback trạng thái đơn)
+
+Backend (C):
+- API user (CRUD + auth)
+- API lịch sử đơn hàng
+- API trạng thái đơn hàng
+- API gợi ý sản phẩm
+- Xử lý cập nhật trạng thái đơn sau thanh toán giả lập
+
+Database (C):
+- Thiết kế bảng user và mở rộng hồ sơ: users/profile, addresses, user_settings.
+- Thiết kế bảng phục vụ gợi ý và theo dõi hành vi: product_views, wishlist_items, recommendation_logs.
+- Thiết kế bảng vòng đời trạng thái đơn: order_status_logs (ghi nhận thời điểm chuyển trạng thái).
+- Viết migration cho toàn bộ bảng auth/profile/recommendation và ràng buộc với orders/users/products.
+- Tạo index cho truy vấn nặng: lịch sử đơn theo user, danh sách yêu thích, log hành vi gần đây.
+
+Frontend (C):
+- Auth FE: tạo màn hình đăng ký/đăng nhập (hiện chưa có giao diện auth hoàn chỉnh trong luồng React).
+- Profile tab "Hồ sơ": form thông tin cá nhân hiện có UI, cần thêm submit + lưu thật + thông báo kết quả.
+- Settings tab "Đổi mật khẩu": form đã có nhưng chưa xử lý submit/validate.
+- Settings tab "Thông báo": checkbox đã có nhưng chưa lưu cài đặt.
+- Settings tab "Xóa tài khoản": nút đã có nhưng chưa có flow xác nhận + gọi API.
+- Tab "Đơn hàng": đang dùng mockOrders, cần chuyển sang dữ liệu API thật.
+- Tab "Đơn hàng": nút "Xem chi tiết" và "Mua lại" hiện chưa có xử lý.
+- Tab "Yêu thích": đang dùng dữ liệu cứng, cần kết nối wishlist thật theo user.
+- Recommendations page: dùng user/session thật thay vì user cứng; đồng bộ theo hành vi xem/mua/yêu thích.
+- Recommendations page: thêm trạng thái loading/error/empty rõ ràng cho các block gợi ý.
+
+============================================================
+GHI CHÚ PHỐI HỢP
+============================================================
+- A bàn giao dữ liệu sản phẩm chuẩn cho B và C dùng lại.
+- B bàn giao order_id và cấu trúc đơn hàng để C xử lý lịch sử/trạng thái.
+- C định nghĩa format trạng thái đơn hàng thống nhất để B hiển thị ở checkout success.
+- Thống nhất naming DB trước khi tạo migration: snake_case, khóa chính id, khóa ngoại dạng <table>_id.
+- Thứ tự tạo migration đề xuất: A (sản phẩm) -> C (user/profile) -> B (cart/order) -> C (logs/recommendation).
+
