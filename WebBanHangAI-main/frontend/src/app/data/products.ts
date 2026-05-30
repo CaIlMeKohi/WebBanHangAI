@@ -9,6 +9,7 @@ export interface CatalogQuery {
   isNew?: boolean;
   isSale?: boolean;
   sort?: ProductSort;
+  page?: number;
 }
 
 export interface CategoryNode {

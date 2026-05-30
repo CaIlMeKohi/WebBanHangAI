@@ -3,7 +3,7 @@ import secrets
 
 from django.contrib.auth.hashers import check_password, make_password
 from django.db import transaction
-from django.db.models import Count, F, Q, Sum
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.response import Response
@@ -12,6 +12,13 @@ from rest_framework.views import APIView
 from recommendations.services import get_for_you_recommendations
 
 from products.services.email_service import send_order_status_email, send_password_reset_otp, send_verification_email
+from products.infrastructure.stored_procedures import (
+    recommendation_performance,
+    report_best_brands,
+    report_best_products,
+    report_revenue,
+    report_revenue_by_payment_method,
+)
 from products.business.serializers import (
     AdminUserSerializer,
     NotificationSerializer,
@@ -423,34 +430,49 @@ class RecommendationMetricsAPIView(APIView):
     permission_classes = [IsAdmin]
 
     def get(self, request):
-        impressions = RecommendationLog.objects.filter(clicked=False).count()
-        clicks = RecommendationLog.objects.filter(clicked=True).count()
-        ctr = clicks / impressions if impressions else 0
-        return Response({'impressions': impressions, 'clicks': clicks, 'ctr': ctr, 'conversions': 0})
+        metrics = recommendation_performance(
+            from_date=request.query_params.get('from_date'),
+            to_date=request.query_params.get('to_date'),
+        )
+        if 'ctr_percent' in metrics and 'ctr' not in metrics:
+            metrics['ctr'] = float(metrics['ctr_percent'] or 0) / 100
+        return Response(metrics)
 
 
 class ReportsRevenueAPIView(APIView):
     permission_classes = [IsAdmin]
 
     def get(self, request):
-        rows = Order.objects.values('status', 'payment_method').annotate(order_count=Count('order_id'), revenue=Sum('final_amount')).order_by('status')
-        return Response(list(rows))
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+        group_by = request.query_params.get('group_by', 'day')
+        revenue = report_revenue(from_date=from_date, to_date=to_date, group_by=group_by)
+        payment_methods = report_revenue_by_payment_method(from_date=from_date, to_date=to_date)
+        return Response({'revenue': revenue, 'payment_methods': payment_methods})
 
 
 class ReportsBestProductsAPIView(APIView):
     permission_classes = [IsAdmin]
 
     def get(self, request):
-        rows = OrderItem.objects.values('product_id', 'product__name').annotate(quantity_sold=Sum('quantity'), revenue=Sum(F('quantity') * F('price'))).order_by('-quantity_sold')[:20]
-        return Response(list(rows))
+        rows = report_best_products(
+            from_date=request.query_params.get('from_date'),
+            to_date=request.query_params.get('to_date'),
+            top=int(request.query_params.get('top', 20)),
+        )
+        return Response(rows)
 
 
 class ReportsBestBrandsAPIView(APIView):
     permission_classes = [IsAdmin]
 
     def get(self, request):
-        rows = OrderItem.objects.values('product__brand_id', 'product__brand__name').annotate(quantity_sold=Sum('quantity'), revenue=Sum(F('quantity') * F('price'))).order_by('-revenue')[:20]
-        return Response(list(rows))
+        rows = report_best_brands(
+            from_date=request.query_params.get('from_date'),
+            to_date=request.query_params.get('to_date'),
+            top=int(request.query_params.get('top', 20)),
+        )
+        return Response(rows)
 
 
 class RecommendationEventAPIView(APIView):
@@ -460,7 +482,7 @@ class RecommendationEventAPIView(APIView):
         product = Product.objects.filter(product_id=product_id, status='active').first()
         if product is None:
             return Response({'detail': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-        RecommendationLog.objects.create(user=request.user, product=product, clicked=event_type == 'click', clicked_at=timezone.now() if event_type == 'click' else None)
+        RecommendationLog.objects.create(user=request.user, product=product, algorithm_type=event_type, clicked=event_type == 'click')
         return Response({'detail': 'Da ghi log recommendation'})
 
 

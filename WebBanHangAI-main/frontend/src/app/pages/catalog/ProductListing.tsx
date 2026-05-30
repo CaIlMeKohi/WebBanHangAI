@@ -15,6 +15,7 @@ import { formatCurrency } from "../../lib/productPresentation";
 
 const MIN_PRICE = 0;
 const MAX_PRICE = 3_000_000;
+const PAGE_SIZE = 20;
 
 const sortOptions: Array<{ value: ProductSort; label: string }> = [
   { value: "featured", label: "Nổi bật" },
@@ -41,6 +42,7 @@ export function ProductListing() {
   const searchQuery = searchParams.get("search") ?? undefined;
   const isNew = ["true", "1"].includes(searchParams.get("new") ?? "");
   const isSale = ["true", "1"].includes(searchParams.get("sale") ?? "");
+  const currentPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
 
   useEffect(() => {
     let isMounted = true;
@@ -93,10 +95,12 @@ export function ProductListing() {
       minPrice: priceRange[0] > MIN_PRICE ? priceRange[0] : undefined,
       maxPrice: priceRange[1] < MAX_PRICE ? priceRange[1] : undefined,
       sort: sortBy,
+      page: currentPage,
     };
-  }, [category, isNew, isSale, priceRange, searchQuery, selectedSubcategories, sortBy]);
+  }, [category, currentPage, isNew, isSale, priceRange, searchQuery, selectedSubcategories, sortBy]);
 
-  const { products, isLoading, error } = useCatalog(catalogQuery);
+  const { products, totalCount, isLoading, error } = useCatalog(catalogQuery);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const activeFilterCount =
     selectedSubcategories.length +
@@ -125,10 +129,22 @@ export function ProductListing() {
     });
   };
 
+  const goToPage = (page: number) => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (page <= 1) {
+      nextSearchParams.delete("page");
+    } else {
+      nextSearchParams.set("page", String(page));
+    }
+    setSearchParams(nextSearchParams);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const resetLocalFilters = () => {
     setSelectedSubcategories([]);
     setPriceRange([MIN_PRICE, MAX_PRICE]);
     setSortBy("featured");
+    goToPage(1);
   };
 
   const pageTitle = (() => {
@@ -156,7 +172,7 @@ export function ProductListing() {
           </div>
           <h1 className="text-4xl font-light tracking-wide">{pageTitle}</h1>
           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-neutral-600 dark:text-neutral-400">
-            <span>{products.length} sản phẩm</span>
+            <span>{totalCount.toLocaleString("vi-VN")} sản phẩm</span>
             {isLoading && <span>Đang cập nhật dữ liệu từ API...</span>}
             {error && <span className="text-red-600">{error}</span>}
           </div>
@@ -301,11 +317,44 @@ export function ProductListing() {
 
           <div className="flex-1">
             {products.length > 0 ? (
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
-                {products.map((product) => (
-                  <ProductCard key={product.id} product={product} />
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
+                  {products.map((product) => (
+                    <ProductCard key={product.id} product={product} />
+                  ))}
+                </div>
+                {totalPages > 1 && (
+                  <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      onClick={() => goToPage(currentPage - 1)}
+                      disabled={currentPage <= 1}
+                      className="border border-neutral-300 px-4 py-2 text-sm disabled:opacity-40"
+                    >
+                      Trước
+                    </button>
+                    {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => goToPage(page)}
+                        className={`h-10 w-10 border text-sm ${
+                          page === currentPage
+                            ? "border-neutral-900 bg-neutral-900 text-white"
+                            : "border-neutral-300"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => goToPage(currentPage + 1)}
+                      disabled={currentPage >= totalPages}
+                      className="border border-neutral-300 px-4 py-2 text-sm disabled:opacity-40"
+                    >
+                      Sau
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="py-16 text-center">
                 <p className="mb-4 text-neutral-600 dark:text-neutral-400">

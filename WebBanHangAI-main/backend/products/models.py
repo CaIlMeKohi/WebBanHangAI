@@ -18,6 +18,10 @@ class StoreUser(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    @property
+    def is_active(self):
+        return self.account_status == 'active'
+
     class Meta:
         db_table = 'users'
 
@@ -46,7 +50,7 @@ class Customer(models.Model):
 
 class Address(models.Model):
     address_id = models.BigAutoField(primary_key=True)
-    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='addresses')
+    user = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='addresses')
     full_name = models.CharField(max_length=255, db_column='receiver_name')
     phone = models.CharField(max_length=20, db_column='receiver_phone')
     address_line = models.CharField(max_length=255)
@@ -171,22 +175,35 @@ class ProductTag(models.Model):
         constraints = [models.UniqueConstraint(fields=['product', 'tag'], name='uniq_product_tag')]
 
 
+class Cart(models.Model):
+    cart_id = models.BigAutoField(primary_key=True)
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='carts')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'carts'
+
+
 class CartItem(models.Model):
-    cart_item_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='cart_items')
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='cart_items')
-    variant = models.ForeignKey(ProductVariant, null=True, blank=True, on_delete=models.SET_NULL, db_column='variant_id', related_name='cart_items')
+    cart_item_id = models.BigAutoField(primary_key=True)
+    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, db_column='cart_id', related_name='items')
+    variant = models.ForeignKey(ProductVariant, on_delete=models.CASCADE, db_column='variant_id', related_name='cart_items')
     quantity = models.IntegerField(default=1)
     added_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def product(self):
+        return self.variant.product if self.variant_id else None
 
     class Meta:
         db_table = 'cart_items'
-        constraints = [models.UniqueConstraint(fields=['user', 'product', 'variant'], name='uniq_user_product_variant_cart')]
 
 
 class WishlistItem(models.Model):
-    wishlist_item_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='wishlist_items')
+    wishlist_item_id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='wishlist_items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='wishlist_items')
     added_at = models.DateTimeField(auto_now_add=True)
 
@@ -197,17 +214,23 @@ class WishlistItem(models.Model):
 class Coupon(models.Model):
     DISCOUNT_TYPE_CHOICES = [('percentage', 'Percentage'), ('fixed', 'Fixed')]
 
-    coupon_id = models.AutoField(primary_key=True)
+    coupon_id = models.BigAutoField(primary_key=True)
     code = models.CharField(max_length=50, unique=True)
-    discount_type = models.CharField(max_length=20, choices=DISCOUNT_TYPE_CHOICES)
-    discount_value = models.IntegerField()
-    min_order_amount = models.IntegerField(default=0)
-    max_discount = models.IntegerField(null=True, blank=True)
-    expiry_date = models.DateField(null=True, blank=True)
+    discount_type = models.CharField(max_length=20, choices=DISCOUNT_TYPE_CHOICES, db_column='coupon_type')
+    discount_value = models.DecimalField(max_digits=14, decimal_places=2)
+    min_order_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    max_discount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     usage_limit = models.IntegerField(null=True, blank=True)
     used_count = models.IntegerField(default=0)
+    per_customer_limit = models.IntegerField(default=1)
+    start_at = models.DateTimeField(null=True, blank=True)
+    end_at = models.DateTimeField()
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def expiry_date(self):
+        return self.end_at.date() if self.end_at else None
 
     class Meta:
         db_table = 'coupons'
@@ -225,15 +248,23 @@ class Order(models.Model):
     PAYMENT_STATUS_CHOICES = [('unpaid', 'Unpaid'), ('paid', 'Paid'), ('refunded', 'Refunded')]
     PAYMENT_METHOD_CHOICES = [('cod', 'COD'), ('vnpay', 'VNPay'), ('momo', 'MoMo'), ('bank_transfer', 'Bank Transfer')]
 
-    order_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='orders')
+    order_id = models.BigAutoField(primary_key=True)
+    order_code = models.CharField(max_length=50)
+    user = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='orders')
     address = models.ForeignKey(Address, on_delete=models.PROTECT, db_column='address_id', related_name='orders')
-    total_amount = models.IntegerField()
-    shipping_fee = models.IntegerField(default=0)
-    discount_amount = models.IntegerField(default=0)
+    receiver_name_snapshot = models.CharField(max_length=255, default='')
+    receiver_phone_snapshot = models.CharField(max_length=20, default='')
+    address_line_snapshot = models.CharField(max_length=255, default='')
+    ward_snapshot = models.CharField(max_length=100, default='')
+    district_snapshot = models.CharField(max_length=100, default='')
+    province_snapshot = models.CharField(max_length=100, default='')
+    postal_code_snapshot = models.CharField(max_length=20, null=True, blank=True)
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, db_column='subtotal_amount')
+    shipping_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    discount_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     coupon = models.ForeignKey(Coupon, null=True, blank=True, on_delete=models.SET_NULL, db_column='coupon_id', related_name='orders')
-    final_amount = models.IntegerField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    final_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_column='order_status')
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -245,12 +276,19 @@ class Order(models.Model):
 
 
 class OrderItem(models.Model):
-    order_item_id = models.AutoField(primary_key=True)
+    order_item_id = models.BigAutoField(primary_key=True)
     order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='order_id', related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT, db_column='product_id', related_name='order_items')
-    variant = models.ForeignKey(ProductVariant, null=True, blank=True, on_delete=models.SET_NULL, db_column='variant_id', related_name='order_items')
+    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, db_column='variant_id', related_name='order_items')
+    product_name_snapshot = models.CharField(max_length=255, default='')
+    brand_name_snapshot = models.CharField(max_length=255, default='')
+    category_name_snapshot = models.CharField(max_length=255, default='')
+    sku_snapshot = models.CharField(max_length=100, default='')
+    color_snapshot = models.CharField(max_length=100, default='')
+    size_snapshot = models.CharField(max_length=50, default='')
+    price = models.DecimalField(max_digits=14, decimal_places=2, db_column='unit_price')
     quantity = models.IntegerField()
-    price = models.IntegerField()
+    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     class Meta:
         db_table = 'order_items'
@@ -260,13 +298,18 @@ class Payment(models.Model):
     STATUS_CHOICES = [('pending', 'Pending'), ('success', 'Success'), ('failed', 'Failed')]
     PAYMENT_METHOD_CHOICES = [('cod', 'COD'), ('vnpay', 'VNPay'), ('momo', 'MoMo'), ('bank_transfer', 'Bank Transfer')]
 
-    payment_id = models.AutoField(primary_key=True)
+    payment_id = models.BigAutoField(primary_key=True)
     order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='order_id', related_name='payments')
-    amount = models.IntegerField()
-    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
-    transaction_id = models.CharField(max_length=255, null=True, blank=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, db_column='method')
+    transaction_id = models.CharField(max_length=255, null=True, blank=True, db_column='transaction_code')
+    gateway_response = models.TextField(null=True, blank=True)
+    failure_reason = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     paid_at = models.DateTimeField(null=True, blank=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'payments'
@@ -340,13 +383,10 @@ class RecommendationLog(models.Model):
     log_id = models.BigAutoField(primary_key=True, db_column='recommendation_log_id')
     user = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='recommendation_logs')
     session_id = models.CharField(max_length=100, null=True, blank=True)
-    recommendation = models.ForeignKey(PrecomputedRecommendation, null=True, blank=True, on_delete=models.SET_NULL, db_column='recommendation_id', related_name='logs')
+    algorithm_type = models.CharField(max_length=50)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='recommendation_logs')
-    shown_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     clicked = models.BooleanField(default=False)
-    clicked_at = models.DateTimeField(null=True, blank=True)
-    ordered_after_click = models.BooleanField(default=False)
-    converted_order_id = models.BigIntegerField(null=True, blank=True)
 
     class Meta:
         db_table = 'recommendation_logs'

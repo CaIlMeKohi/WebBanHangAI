@@ -1,8 +1,6 @@
-from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand
-from django.utils import timezone
 
-from products.models import Address, Brand, Category, Customer, Product, ProductImage, ProductVariant, StoreUser, UserInteraction
+from products.models import Brand, Category, Product, ProductImage, ProductVariant
 
 
 SEED_CATEGORIES = [
@@ -219,59 +217,6 @@ class Command(BaseCommand):
     help = "Seed categories, brands, products, and sample demo data."
 
     def handle(self, *args, **options):
-        admin_user = StoreUser.objects.update_or_create(
-            email="admin@local.test",
-            defaults={
-                "password_hash": make_password("123"),
-                "phone": "0900000000",
-                "role": "admin",
-                "account_status": "active",
-                "email_verified_at": None,
-                "must_change_password": False,
-            },
-        )[0]
-        customer_user = StoreUser.objects.update_or_create(
-            email="user@local.test",
-            defaults={
-                "password_hash": make_password("123"),
-                "phone": "0912345678",
-                "role": "customer",
-                "account_status": "active",
-                "email_verified_at": timezone.now(),
-                "must_change_password": False,
-            },
-        )[0]
-
-        Customer.objects.update_or_create(
-            user=admin_user,
-            defaults={
-                "customer_code": f"KH{admin_user.user_id:06d}",
-                "full_name": "Quan tri vien",
-                "gender": "other",
-            },
-        )
-        Customer.objects.update_or_create(
-            user=customer_user,
-            defaults={
-                "customer_code": f"KH{customer_user.user_id:06d}",
-                "full_name": "Khach hang demo",
-                "gender": "unknown",
-            },
-        )
-
-        Address.objects.update_or_create(
-            user=customer_user,
-            is_default=True,
-            defaults={
-                "full_name": "Khach hang demo",
-                "phone": "0912345678",
-                "address_line": "123 Nguyen Trai",
-                "ward": "Phuong 1",
-                "district": "Quan 1",
-                "province": "TP. Ho Chi Minh",
-            },
-        )
-
         categories_by_slug: dict[str, Category] = {}
         for item in SEED_CATEGORIES:
             parent_slug = item.get("parent_slug")
@@ -313,15 +258,20 @@ class Command(BaseCommand):
                     "name": item["name"],
                     "short_description": item.get("short_description", ""),
                     "description": item["description"],
+                    "price": item["base_price"],
+                    "sale_price": None,
+                    "stock_quantity": sum(variant.get("stock_quantity", 0) for variant in item["variants"]),
                     "base_price": item["base_price"],
                     "brand": brands_by_slug[item["brand_slug"]],
                     "category": categories_by_slug[item["category_slug"]],
                     "average_rating": item["average_rating"],
+                    "num_reviews": item["review_count"],
                     "review_count": item["review_count"],
                     "sold_count": item["sold_count"],
                     "view_count": item["view_count"],
                     "feature_text": item["feature_text"],
                     "status": item.get("status", "active"),
+                    "is_active": item.get("status", "active") == "active",
                     "is_new": item.get("is_new", False),
                     "is_bestseller": item.get("is_bestseller", False),
                 },
@@ -331,7 +281,7 @@ class Command(BaseCommand):
             ProductImage.objects.update_or_create(
                 product=product,
                 image_url=item["image_url"],
-                defaults={"alt_text": product.name, "is_primary": True, "display_order": 0},
+                defaults={"is_primary": True},
             )
 
             existing_variant_ids = set()
@@ -340,13 +290,9 @@ class Command(BaseCommand):
                     sku=variant["sku"],
                     defaults={
                         "product": product,
-                        "color": variant["color"],
-                        "size": variant["size"],
+                        "variant_attributes": f'{{"color":"{variant["color"]}","size":"{variant["size"]}"}}',
                         "price": variant.get("price", item["base_price"]),
                         "stock_quantity": variant.get("stock_quantity", 0),
-                        "stock_reserved": variant.get("stock_reserved", 0),
-                        "low_stock_threshold": variant.get("low_stock_threshold", 0),
-                        "is_active": variant.get("is_active", True),
                     },
                 )
                 existing_variant_ids.add(variant_obj.variant_id)
@@ -357,20 +303,5 @@ class Command(BaseCommand):
                 created += 1
             else:
                 updated += 1
-
-        UserInteraction.objects.filter(session_id="guest-demo").delete()
-        for product_slug, interaction_type, score in [
-            ("ao-thun-trang-classic", "view", 1.0),
-            ("ao-len-cashmere", "wishlist_add", 2.5),
-            ("quan-jean-den-slim-fit", "add_to_cart", 3.0),
-            ("vay-midi-vai-lanh", "purchase", 5.0),
-        ]:
-            UserInteraction.objects.create(
-                user=None,
-                session_id="guest-demo",
-                product=product_by_slug[product_slug],
-                interaction_type=interaction_type,
-                score=score,
-            )
 
         self.stdout.write(self.style.SUCCESS(f"Seed complete: created={created}, updated={updated}"))

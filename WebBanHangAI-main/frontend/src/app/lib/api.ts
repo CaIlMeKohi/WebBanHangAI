@@ -93,6 +93,7 @@ function buildCatalogQuery(query?: CatalogQuery | string): string {
   if (query.minPrice != null) params.set("minPrice", String(query.minPrice));
   if (query.maxPrice != null) params.set("maxPrice", String(query.maxPrice));
   if (query.sort) params.set("sort", query.sort);
+  if (query.page && query.page > 1) params.set("page", String(query.page));
   query.subcategory?.forEach((item) => params.append("subcategory", item));
 
   const queryString = params.toString();
@@ -105,6 +106,24 @@ export async function fetchProducts(
   const query = buildCatalogQuery(catalogQuery);
   const response = await apiGet<Product[] | { results: Product[] }>(`/products/${query}`);
   return Array.isArray(response) ? response : response.results;
+}
+
+export interface ProductPage {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: Product[];
+}
+
+export async function fetchProductPage(
+  catalogQuery?: CatalogQuery | string,
+): Promise<ProductPage> {
+  const query = buildCatalogQuery(catalogQuery);
+  const response = await apiGet<Product[] | ProductPage>(`/products/${query}`);
+  if (Array.isArray(response)) {
+    return { count: response.length, next: null, previous: null, results: response };
+  }
+  return response;
 }
 
 export async function fetchProductById(id: string): Promise<Product> {

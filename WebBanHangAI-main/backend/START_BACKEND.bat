@@ -1,7 +1,8 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%"
 echo ==========================================
 echo   WEBBANHANG - START BACKEND (DJANGO)
 echo ==========================================
@@ -49,37 +50,20 @@ if not exist "..\frontend\dist\index.html" (
   popd
 )
 
-set "REQ_HASH_FILE=venv\.requirements_hash"
-set "CURRENT_HASH="
-set "NEED_INSTALL=1"
-
-for /f "skip=1 tokens=1" %%H in ('certutil -hashfile requirements.txt SHA256 ^| findstr /R /V /C:"hash of file" /C:"CertUtil"') do (
-  set "CURRENT_HASH=%%H"
-  goto :hash_ready
-)
-
-:hash_ready
-if not defined CURRENT_HASH (
-  echo [WARN] Khong tinh duoc hash requirements, tien hanh cai dat dependencies.
-) else if exist "%REQ_HASH_FILE%" (
-  set /p "STORED_HASH="<"%REQ_HASH_FILE%"
-  if /I "!STORED_HASH!"=="!CURRENT_HASH!" set "NEED_INSTALL=0"
-)
-
-if "!NEED_INSTALL!"=="1" (
+set "REQ_FILE=requirements.txt"
+if exist "%REQ_FILE%" (
   echo [INFO] Cai dat dependencies...
-  "%VENV_PY%" -m pip install -r requirements.txt || goto :error
-  if defined CURRENT_HASH >"%REQ_HASH_FILE%" echo !CURRENT_HASH!
+  "%VENV_PY%" -m pip install -r "%REQ_FILE%" || goto :error
 ) else (
-  echo [INFO] Dependencies da moi nhat, bo qua cai dat.
+  echo [WARN] Khong tim thay requirements.txt, bo qua buoc cai dat dependencies.
 )
 
 echo [INFO] Kiem tra / tao database SQL Server neu can...
 "%VENV_PY%" ensure_sqlserver_database.py || goto :error
 
 echo [INFO] Dong bo migration voi database hien co...
-echo [INFO] Nếu database đã có schema, dùng migrate --fake để đánh dấu migrations là đã áp dụng.
-"%VENV_PY%" manage.py migrate --fake || goto :error
+echo [INFO] Nếu database đã có schema, dùng migrate --fake-initial để đánh dấu migrations khởi tạo là đã áp dụng.
+"%VENV_PY%" manage.py migrate --fake-initial || goto :error
 
 echo [INFO] Khoi dong server tai http://localhost:8000 ...
 "%VENV_PY%" manage.py runserver

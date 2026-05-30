@@ -2,7 +2,7 @@ from datetime import timedelta
 import secrets
 
 from django.contrib.auth.hashers import check_password, make_password
-from django.db import models, transaction
+from django.db import DatabaseError, models, transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import generics, status, viewsets
@@ -11,9 +11,13 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .application.cart_service import get_customer_cart_items, get_or_create_cart
+from .application.catalog_queries import active_products_queryset, apply_catalog_filters
+from .application.customer_context import get_active_user, get_customer_for_user
+from .infrastructure.stored_procedures import check_variant_stock, decrease_variant_stock, low_stock_variants
 from .security.authentication import create_access_token
 from .services.email_service import send_order_confirmation, send_verification_email
-from .models import Address, Brand, CartItem, Coupon, Customer, EmailVerificationToken, InventoryLog, LoginLog, Order, OrderItem, Payment, Product, ProductVariant, Category, SearchLog, StoreUser, UserInteraction, WishlistItem
+from .models import Address, Brand, Cart, CartItem, Coupon, Customer, EmailVerificationToken, InventoryLog, LoginLog, Order, OrderItem, Payment, Product, ProductVariant, Category, SearchLog, StoreUser, UserInteraction, WishlistItem
 from .security.permissions import IsAdmin, IsStaff
 from .serializers import (
     AddressSerializer,
@@ -34,9 +38,9 @@ from .serializers import (
 
 
 class ProductPagination(PageNumberPagination):
-    page_size = 20
+    page_size = 250
     page_size_query_param = 'page_size'
-    max_page_size = 50
+    max_page_size = 250
 
 
 class ProductListAPIView(generics.ListAPIView):
@@ -44,69 +48,30 @@ class ProductListAPIView(generics.ListAPIView):
     pagination_class = ProductPagination
 
     def get_queryset(self):
-        queryset = Product.objects.filter(status='active').select_related('category', 'brand').prefetch_related('images', 'variants', 'category__children', 'interactions')
-
-        category = self.request.query_params.get('category')
-        is_new = self.request.query_params.get('new')
-        is_sale = self.request.query_params.get('sale')
+        queryset = active_products_queryset()
         search = self.request.query_params.get('search')
-        subcategories = self.request.query_params.getlist('subcategory')
-        brand = self.request.query_params.get('brand')
-        size = self.request.query_params.get('size')
-        color = self.request.query_params.get('color')
-        rating = self.request.query_params.get('rating')
-        in_stock = self.request.query_params.get('in_stock')
-
-        if category:
-            queryset = queryset.filter(Q(category__slug=category) | Q(category__parent__slug=category))
-        if is_new in {'true', '1'}:
-            queryset = queryset.filter(is_new=True)
-        if is_sale in {'true', '1'}:
-            queryset = queryset.none()
+        queryset = apply_catalog_filters(queryset, self.request.query_params)
         if search:
-            queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search) | Q(feature_text__icontains=search) | Q(brand__name__icontains=search))
             user = _get_user(self.request)
-            SearchLog.objects.create(
-                user=user,
-                session_id=self.request.query_params.get('session_id'),
-                query=search[:255],
-            )
+            try:
+                SearchLog.objects.create(
+                    user=user,
+                    session_id=self.request.query_params.get('session_id'),
+                    query=search[:255],
+                )
+            except DatabaseError:
+                pass
             first_product = queryset.first()
             if user and first_product:
-                UserInteraction.objects.create(user=user, product=first_product, interaction_type='search', search_query=search[:255], score=0.5)
-        if subcategories:
-            queryset = queryset.filter(category__slug__in=subcategories)
-        if brand:
-            queryset = queryset.filter(Q(brand__slug=brand) | Q(brand_id=brand))
-        if size:
-            queryset = queryset.filter(variants__size=size, variants__is_active=True)
-        if color:
-            queryset = queryset.filter(variants__color=color, variants__is_active=True)
-        if rating:
-            queryset = queryset.filter(average_rating__gte=rating)
-        if in_stock in {'true', '1'}:
-            queryset = queryset.filter(variants__stock_quantity__gt=0)
-
-        min_price = self.request.query_params.get('minPrice')
-        max_price = self.request.query_params.get('maxPrice')
-        sort = self.request.query_params.get('sort')
-
-        if min_price:
-            queryset = queryset.filter(base_price__gte=min_price)
-        if max_price:
-            queryset = queryset.filter(base_price__lte=max_price)
-        if sort == 'price_asc':
-            queryset = queryset.order_by('base_price')
-        elif sort == 'price_desc':
-            queryset = queryset.order_by('-base_price')
-        elif sort == 'newest':
-            queryset = queryset.order_by('-created_at')
-
-        return queryset.distinct()
+                try:
+                    UserInteraction.objects.create(user=user, product=first_product, interaction_type='search', search_query=search[:255], score=0.5)
+                except DatabaseError:
+                    pass
+        return queryset
 
 
 class ProductDetailAPIView(generics.RetrieveAPIView):
-    queryset = Product.objects.filter(status='active').select_related('category', 'brand').prefetch_related('images', 'variants', 'category__children', 'interactions')
+    queryset = Product.objects.filter(status='active').select_related('category', 'brand').prefetch_related('images', 'variants', 'category__children')
     serializer_class = ProductSerializer
     lookup_field = 'product_id'
     lookup_url_kwarg = 'id'
@@ -115,7 +80,10 @@ class ProductDetailAPIView(generics.RetrieveAPIView):
         response = super().retrieve(request, *args, **kwargs)
         user = _get_user(request)
         if user:
-            UserInteraction.objects.create(user=user, product=self.get_object(), interaction_type='view', score=1.0)
+            try:
+                UserInteraction.objects.create(user=user, product=self.get_object(), interaction_type='view', score=1.0)
+            except DatabaseError:
+                pass
         return response
 
 
@@ -170,26 +138,13 @@ class AuthLoginAPIView(APIView):
         password = serializer.validated_data['password']
         user = StoreUser.objects.filter(Q(email=username) | Q(phone=username)).first()
 
-        if not user or user.account_status != 'active':
+        if not user or not user.is_active:
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=request.META.get('REMOTE_ADDR', ''), reason='inactive_or_missing')
             return Response({'detail': 'Tai khoan khong hop le hoac da bi khoa'}, status=status.HTTP_400_BAD_REQUEST)
-        if user.locked_until and user.locked_until > timezone.now():
-            LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=request.META.get('REMOTE_ADDR', ''), reason='temporarily_locked')
-            return Response({'detail': 'Tai khoan dang bi khoa tam thoi. Vui long thu lai sau.'}, status=status.HTTP_423_LOCKED)
         if not check_password(password, user.password_hash):
-            user.failed_login_count += 1
-            update_fields = ['failed_login_count']
-            if user.failed_login_count >= 5:
-                user.locked_until = timezone.now() + timedelta(minutes=30)
-                update_fields.append('locked_until')
-            user.save(update_fields=update_fields)
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=request.META.get('REMOTE_ADDR', ''), reason='bad_password')
             return Response({'detail': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user.last_login_at = timezone.now()
-        user.failed_login_count = 0
-        user.locked_until = None
-        user.save(update_fields=['last_login_at', 'failed_login_count', 'locked_until'])
         LoginLog.objects.create(user=user, identifier=username, success=True, ip_address=request.META.get('REMOTE_ADDR', ''))
         return Response({'user': StoreUserSerializer(user).data, 'access': create_access_token(user), 'expires_in_hours': 8 if user.role in {'staff', 'admin'} else 24})
 
@@ -225,13 +180,14 @@ class AuthRegisterAPIView(APIView):
                 gender=serializer.validated_data.get('gender', 'unknown'),
                 birthday=serializer.validated_data.get('birthday'),
             )
+            customer = user.customer_profile
             address_line = str(request.data.get('address_line', '')).strip()
             ward = str(request.data.get('ward', '')).strip()
             district = str(request.data.get('district', '')).strip()
             province = str(request.data.get('province', '')).strip()
             if address_line and ward and district and province:
                 Address.objects.create(
-                    user=user,
+                    user=customer,
                     full_name=serializer.validated_data['full_name'],
                     phone=phone or '',
                     address_line=address_line,
@@ -255,11 +211,18 @@ def _get_user(request):
     user_id = request.query_params.get('user_id') or request.data.get('user_id')
     if not user_id:
         return None
-    return StoreUser.objects.filter(user_id=user_id, account_status='active').first()
+    return get_active_user(user_id)
+
+
+def _get_customer(user):
+    return get_customer_for_user(user)
 
 
 def _available_stock(product, variant=None):
     if variant is not None:
+        stock = check_variant_stock(variant.variant_id, 1)
+        if stock is not None and 'available_stock' in stock:
+            return max(0, int(stock['available_stock']))
         return max(0, variant.stock_quantity - variant.stock_reserved)
     return sum(max(0, item.stock_quantity - item.stock_reserved) for item in product.variants.all())
 
@@ -303,27 +266,29 @@ class ProfileAPIView(APIView):
 class AddressListCreateAPIView(APIView):
     def get(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response([])
-        addresses = Address.objects.filter(user=user).order_by('-is_default', '-created_at')
+        addresses = Address.objects.filter(user=customer).order_by('-is_default', '-created_at')
         return Response(AddressSerializer(addresses, many=True).data)
 
     def post(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if Address.objects.filter(user=user).count() >= 5:
+        if Address.objects.filter(user=customer).count() >= 5:
             return Response({'detail': 'Moi khach hang chi duoc luu toi da 5 dia chi'}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = AddressSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        should_default = serializer.validated_data.get('is_default') or not Address.objects.filter(user=user).exists()
+        should_default = serializer.validated_data.get('is_default') or not Address.objects.filter(user=customer).exists()
 
         with transaction.atomic():
             if should_default:
-                Address.objects.filter(user=user, is_default=True).update(is_default=False)
-            address = serializer.save(user=user, is_default=should_default)
+                Address.objects.filter(user=customer, is_default=True).update(is_default=False)
+            address = serializer.save(user=customer, is_default=should_default)
 
         return Response(AddressSerializer(address).data, status=status.HTTP_201_CREATED)
 
@@ -331,7 +296,8 @@ class AddressListCreateAPIView(APIView):
 class AddressDetailAPIView(APIView):
     def put(self, request, address_id):
         user = _get_user(request)
-        address = Address.objects.filter(address_id=address_id, user=user).first()
+        customer = _get_customer(user)
+        address = Address.objects.filter(address_id=address_id, user=customer).first()
         if address is None:
             return Response({'detail': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -341,20 +307,21 @@ class AddressDetailAPIView(APIView):
 
         with transaction.atomic():
             if should_default:
-                Address.objects.filter(user=user, is_default=True).exclude(address_id=address_id).update(is_default=False)
+                Address.objects.filter(user=customer, is_default=True).exclude(address_id=address_id).update(is_default=False)
             address = serializer.save()
 
         return Response(AddressSerializer(address).data)
 
     def delete(self, request, address_id):
         user = _get_user(request)
-        address = Address.objects.filter(address_id=address_id, user=user).first()
+        customer = _get_customer(user)
+        address = Address.objects.filter(address_id=address_id, user=customer).first()
         if address is None:
             return Response({'detail': 'Address not found'}, status=status.HTTP_404_NOT_FOUND)
         was_default = address.is_default
         address.delete()
         if was_default:
-            next_address = Address.objects.filter(user=user).order_by('-created_at').first()
+            next_address = Address.objects.filter(user=customer).order_by('-created_at').first()
             if next_address:
                 next_address.is_default = True
                 next_address.save(update_fields=['is_default'])
@@ -364,14 +331,16 @@ class AddressDetailAPIView(APIView):
 class CartAPIView(APIView):
     def get(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response([])
-        items = CartItem.objects.filter(user=user).select_related('product', 'variant', 'product__category', 'product__brand').prefetch_related('product__images', 'product__variants')
+        items = get_customer_cart_items(customer)
         return Response(CartItemSerializer(items, many=True).data)
 
     def post(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
         product = Product.objects.filter(product_id=request.data.get('product_id'), status='active').first()
@@ -380,20 +349,27 @@ class CartAPIView(APIView):
         variant = None
         size = request.data.get('size')
         color = request.data.get('color')
-        if size or color:
-            variants = product.variants.all()
+        variants = product.variants.filter(is_active=True)
+        requested_variant_id = request.data.get('variant_id')
+        if requested_variant_id:
+            variant = variants.filter(variant_id=requested_variant_id).first()
+        if variant is None:
             for candidate in variants:
                 if (not size or candidate.size == size) and (not color or candidate.color == color):
                     variant = candidate
                     break
+        if variant is None:
+            variant = variants.first()
+        if variant is None:
+            return Response({'detail': 'San pham chua co SKU hop le'}, status=status.HTTP_400_BAD_REQUEST)
 
         quantity = max(1, int(request.data.get('quantity', 1)))
         if _available_stock(product, variant) < quantity:
             return Response({'detail': f'Khong du ton kho cho bien the {_variant_label(variant)}'}, status=status.HTTP_400_BAD_REQUEST)
 
+        cart = get_or_create_cart(customer)
         item, created = CartItem.objects.get_or_create(
-            user=user,
-            product=product,
+            cart=cart,
             variant=variant,
             defaults={'quantity': quantity},
         )
@@ -410,7 +386,8 @@ class CartAPIView(APIView):
 class CartItemAPIView(APIView):
     def put(self, request, item_id):
         user = _get_user(request)
-        item = CartItem.objects.filter(cart_item_id=item_id, user=user).first()
+        customer = _get_customer(user)
+        item = CartItem.objects.filter(cart_item_id=item_id, cart__customer=customer).select_related('variant', 'variant__product').first()
         if not item:
             return Response({'detail': 'Cart item not found'}, status=status.HTTP_404_NOT_FOUND)
         next_quantity = max(1, int(request.data.get('quantity', item.quantity)))
@@ -422,7 +399,8 @@ class CartItemAPIView(APIView):
 
     def delete(self, request, item_id):
         user = _get_user(request)
-        CartItem.objects.filter(cart_item_id=item_id, user=user).delete()
+        customer = _get_customer(user)
+        CartItem.objects.filter(cart_item_id=item_id, cart__customer=customer).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -431,19 +409,25 @@ class WishlistAPIView(APIView):
         user = _get_user(request)
         if not user:
             return Response([])
-        items = WishlistItem.objects.filter(user=user).select_related('product', 'product__category', 'product__brand').prefetch_related('product__images', 'product__variants')
+        customer = _get_customer(user)
+        if not customer:
+            return Response([])
+        items = WishlistItem.objects.filter(user=customer).select_related('product', 'product__category', 'product__brand').prefetch_related('product__images', 'product__variants')
         return Response(WishlistItemSerializer(items, many=True).data)
 
     def post(self, request):
         user = _get_user(request)
         if not user:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        if WishlistItem.objects.filter(user=user).count() >= 100:
+        customer = _get_customer(user)
+        if not customer:
+            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        if WishlistItem.objects.filter(user=customer).count() >= 100:
             return Response({'detail': 'Danh sach yeu thich toi da 100 san pham'}, status=status.HTTP_400_BAD_REQUEST)
         product = Product.objects.filter(product_id=request.data.get('product_id'), status='active').first()
         if product is None:
             return Response({'detail': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-        item, _ = WishlistItem.objects.get_or_create(user=user, product=product)
+        item, _ = WishlistItem.objects.get_or_create(user=customer, product=product)
         UserInteraction.objects.create(user=user, product=product, interaction_type='wishlist_add', score=2.5)
         return Response(WishlistItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
@@ -451,26 +435,28 @@ class WishlistAPIView(APIView):
 class OrderListCreateAPIView(APIView):
     def get(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response([])
-        orders = Order.objects.filter(user=user).prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').order_by('-created_at')
+        orders = Order.objects.filter(user=customer).prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').order_by('-created_at')
         return Response(OrderSerializer(orders, many=True).data)
 
     @transaction.atomic
     def post(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
         selected_ids = request.data.get('cart_item_ids') or []
-        cart_queryset = CartItem.objects.filter(user=user).select_related('product', 'variant')
+        cart_queryset = get_customer_cart_items(customer)
         if selected_ids:
             cart_queryset = cart_queryset.filter(cart_item_id__in=selected_ids)
         cart_items = list(cart_queryset)
         if not cart_items:
             return Response({'detail': 'Cart is empty'}, status=status.HTTP_400_BAD_REQUEST)
 
-        address = Address.objects.filter(user=user, is_default=True).first()
+        address = Address.objects.filter(user=customer, is_default=True).first()
         if address is None:
             return Response({'detail': 'Vui long cap nhat dia chi giao hang mac dinh truoc khi dat hang'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -481,8 +467,16 @@ class OrderListCreateAPIView(APIView):
         subtotal = sum(int(item.variant.price if item.variant_id else item.product.base_price) * item.quantity for item in cart_items)
         shipping_fee = 0 if subtotal > 1_000_000 else 30_000
         order = Order.objects.create(
-            user=user,
+            user=customer,
             address=address,
+            order_code=f'ORD{timezone.now().strftime("%Y%m%d%H%M%S")}{customer.customer_id}',
+            receiver_name_snapshot=address.full_name,
+            receiver_phone_snapshot=address.phone,
+            address_line_snapshot=address.address_line,
+            ward_snapshot=address.ward,
+            district_snapshot=address.district,
+            province_snapshot=address.province,
+            postal_code_snapshot=address.postal_code,
             total_amount=subtotal,
             shipping_fee=shipping_fee,
             discount_amount=0,
@@ -491,14 +485,27 @@ class OrderListCreateAPIView(APIView):
         )
         for item in cart_items:
             price = int(item.variant.price if item.variant_id else item.product.base_price)
-            OrderItem.objects.create(order=order, product=item.product, variant=item.variant, quantity=item.quantity, price=price)
+            OrderItem.objects.create(
+                order=order,
+                product=item.product,
+                variant=item.variant,
+                product_name_snapshot=item.product.name,
+                brand_name_snapshot=item.product.brand.name,
+                category_name_snapshot=item.product.category.name,
+                sku_snapshot=item.variant.sku,
+                color_snapshot=item.variant.color,
+                size_snapshot=item.variant.size,
+                quantity=item.quantity,
+                price=price,
+                subtotal=price * item.quantity,
+            )
             if item.variant_id:
-                item.variant.stock_quantity -= item.quantity
-                item.variant.save(update_fields=['stock_quantity'])
+                if not decrease_variant_stock(item.variant.variant_id, item.quantity):
+                    return Response({'detail': f'San pham {item.product.name} khong du ton kho'}, status=status.HTTP_400_BAD_REQUEST)
             UserInteraction.objects.create(user=user, product=item.product, interaction_type='purchase', score=5.0)
 
         Payment.objects.create(order=order, amount=order.final_amount, payment_method=order.payment_method, status='pending')
-        CartItem.objects.filter(cart_item_id__in=[item.cart_item_id for item in cart_items], user=user).delete()
+        CartItem.objects.filter(cart_item_id__in=[item.cart_item_id for item in cart_items], cart__customer=customer).delete()
         send_order_confirmation(user.email, order.order_id, order.final_amount)
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
@@ -545,16 +552,18 @@ class AdminCouponViewSet(viewsets.ModelViewSet):
 class CartClearAPIView(APIView):
     def delete(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        CartItem.objects.filter(user=user).delete()
+        CartItem.objects.filter(cart__customer=customer).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ApplyCouponAPIView(APIView):
     def post(self, request):
         user = _get_user(request)
-        if not user:
+        customer = _get_customer(user)
+        if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
         code = str(request.data.get('code', '')).strip().upper()
@@ -566,7 +575,7 @@ class ApplyCouponAPIView(APIView):
         if coupon.usage_limit is not None and coupon.used_count >= coupon.usage_limit:
             return Response({'detail': 'Coupon da het luot su dung'}, status=status.HTTP_400_BAD_REQUEST)
 
-        cart_items = CartItem.objects.filter(user=user).select_related('product', 'variant')
+        cart_items = get_customer_cart_items(customer)
         subtotal = sum(int(item.variant.price if item.variant_id else item.product.base_price) * item.quantity for item in cart_items)
         if subtotal < coupon.min_order_amount:
             return Response({'detail': 'Don hang chua dat gia tri toi thieu'}, status=status.HTTP_400_BAD_REQUEST)
@@ -584,7 +593,8 @@ class ApplyCouponAPIView(APIView):
 class OrderDetailAPIView(APIView):
     def get(self, request, order_id):
         user = _get_user(request)
-        order = Order.objects.filter(order_id=order_id, user=user).prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').first()
+        customer = _get_customer(user)
+        order = Order.objects.filter(order_id=order_id, user=customer).prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').first()
         if order is None:
             return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(OrderSerializer(order).data)
@@ -594,7 +604,8 @@ class OrderCancelAPIView(APIView):
     @transaction.atomic
     def post(self, request, order_id):
         user = _get_user(request)
-        order = Order.objects.filter(order_id=order_id, user=user).first()
+        customer = _get_customer(user)
+        order = Order.objects.filter(order_id=order_id, user=customer).first()
         if order is None:
             return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
         if order.status not in {'pending', 'confirmed', 'processing'}:
@@ -667,5 +678,4 @@ class LowStockAPIView(APIView):
     permission_classes = [IsStaff]
 
     def get(self, request):
-        variants = ProductVariant.objects.filter(stock_quantity__lte=models.F('low_stock_threshold')).select_related('product')
-        return Response(ProductVariantSerializer(variants, many=True).data)
+        return Response(low_stock_variants())

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchProducts } from "../lib/api";
+import { fetchProductPage } from "../lib/api";
 import type { CatalogQuery, Product } from "../data/products";
 
 export function useCatalog(query?: CatalogQuery) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,13 +19,15 @@ export function useCatalog(query?: CatalogQuery) {
       }
 
       try {
-        const apiProducts = await fetchProducts(query);
+        const productPage = await fetchProductPage(query);
         if (isMounted) {
-          setProducts(apiProducts);
+          setProducts(productPage.results);
+          setTotalCount(productPage.count);
         }
       } catch (caughtError) {
         if (isMounted) {
           setProducts([]);
+          setTotalCount(0);
           setError(
             caughtError instanceof Error
               ? caughtError.message
@@ -46,7 +49,7 @@ export function useCatalog(query?: CatalogQuery) {
   }, [query]);
 
   return useMemo(
-    () => ({ products, isLoading, error }),
-    [products, isLoading, error],
+    () => ({ products, totalCount, isLoading, error }),
+    [products, totalCount, isLoading, error],
   );
 }
