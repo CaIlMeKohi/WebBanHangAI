@@ -16,4 +16,5 @@ Guide_Requirement_DB_Task/
 backend/db_inspect.py
 backend/debug_api_probe.py
 *.log
+backups/
 Thumbs.db

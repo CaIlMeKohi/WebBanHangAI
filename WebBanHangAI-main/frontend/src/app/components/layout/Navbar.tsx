@@ -209,7 +209,7 @@ export function Navbar() {
               <User className="w-5 h-5" />
             </Link>
             <Link
-              to={authTarget("/profile?tab=wishlist")}
+              to={authTarget("/wishlist")}
               className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full transition-colors relative"
             >
               <Heart className="w-5 h-5" />

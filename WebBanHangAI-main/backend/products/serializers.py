@@ -150,6 +150,15 @@ class ProductSerializer(serializers.ModelSerializer):
 
 class ProductAdminSerializer(serializers.ModelSerializer):
     """Serializer for admin CRUD operations (create/update/delete)"""
+    status = serializers.ChoiceField(
+        choices=['active', 'draft', 'hidden', 'discontinued'],
+        required=False,
+    )
+    id = serializers.SerializerMethodField()
+    price = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+    subcategory = serializers.SerializerMethodField()
+    stock_quantity = serializers.SerializerMethodField()
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.all(),
         source='category',
@@ -167,25 +176,51 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = [
+            'id',
             'product_id',
             'name',
             'slug',
             'description',
+            'price',
             'base_price',
             'category_id',
+            'category',
+            'subcategory',
             'brand_id',
             'average_rating',
             'review_count',
             'sold_count',
             'view_count',
             'feature_text',
+            'tags',
             'status',
             'is_new',
             'is_bestseller',
+            'stock_quantity',
             'image_url',
             'image_file',
         ]
         read_only_fields = ['product_id']
+
+    def get_id(self, obj: Product) -> str:
+        return str(obj.product_id)
+
+    def get_price(self, obj: Product) -> int:
+        return int(obj.base_price)
+
+    def get_category(self, obj: Product) -> str:
+        if obj.category.parent_id:
+            return obj.category.parent.slug
+        return obj.category.slug
+
+    def get_subcategory(self, obj: Product) -> str:
+        if obj.category.parent_id:
+            return obj.category.slug
+        child = obj.category.children.first()
+        return child.slug if child else obj.category.slug
+
+    def get_stock_quantity(self, obj: Product) -> int:
+        return sum(max(0, variant.stock_quantity - variant.stock_reserved) for variant in obj.variants.all())
 
     def _store_uploaded_image(self, uploaded_file) -> str:
         file_extension = Path(uploaded_file.name).suffix or '.jpg'

@@ -52,9 +52,6 @@ class ReturnStatusHistorySerializer(serializers.ModelSerializer):
 
 
 class ReturnRequestSerializer(serializers.ModelSerializer):
-    images = ReturnRequestImageSerializer(many=True, read_only=True)
-    status_histories = ReturnStatusHistorySerializer(many=True, read_only=True)
-
     class Meta:
         model = ReturnRequest
         fields = [
@@ -69,9 +66,7 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
             'processed_by',
             'processed_at',
             'created_at',
-            'updated_at',
-            'images',
-            'status_histories',
+            'evidence_image_urls',
         ]
         read_only_fields = ['return_id', 'user', 'status', 'reject_reason', 'processed_by', 'processed_at', 'created_at', 'updated_at']
 
@@ -89,6 +84,13 @@ class PaymentMethodSerializer(serializers.ModelSerializer):
         fields = ['method_id', 'code', 'name', 'is_active', 'config', 'created_at', 'updated_at']
         read_only_fields = ['method_id', 'created_at', 'updated_at']
 
+    def validate_code(self, value):
+        value = str(value or '').strip().lower()
+        allowed = {'cod', 'vnpay', 'momo', 'bank_transfer'}
+        if value not in allowed:
+            raise serializers.ValidationError('Phuong thuc thanh toan khong hop le')
+        return value
+
 
 class RecommendationConfigSerializer(serializers.ModelSerializer):
     class Meta:
@@ -97,8 +99,32 @@ class RecommendationConfigSerializer(serializers.ModelSerializer):
         read_only_fields = ['config_id', 'updated_at']
 
 
+class AdminLowStockThresholdSerializer(serializers.Serializer):
+    threshold = serializers.IntegerField(min_value=0, max_value=100000)
+
+
 class AdminUserSerializer(StoreUserSerializer):
     class Meta(StoreUserSerializer.Meta):
         model = StoreUser
         fields = ['user_id', 'username', 'full_name', 'email', 'phone', 'role', 'is_active', 'account_status', 'must_change_password', 'created_at']
         read_only_fields = ['user_id', 'created_at']
+
+
+class AdminUserUpdateSerializer(serializers.Serializer):
+    email = serializers.EmailField(max_length=254, required=False)
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    role = serializers.ChoiceField(choices=['customer', 'staff', 'admin'], required=False)
+    account_status = serializers.ChoiceField(
+        choices=['active', 'locked', 'inactive', 'pending_verification'],
+        required=False,
+    )
+    full_name = serializers.CharField(max_length=255, required=False)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+    def validate_phone(self, value):
+        phone = str(value or '').strip()
+        if phone and (not phone.isdigit() or len(phone) < 9 or len(phone) > 20):
+            raise serializers.ValidationError('So dien thoai khong hop le')
+        return phone or None

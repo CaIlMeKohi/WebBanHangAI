@@ -15,8 +15,21 @@ export function AdminLogin() {
   useEffect(() => {
     if (isLoggedIn) {
       const next = searchParams.get("next");
-      const needsCustomer = next?.startsWith("/cart") || next?.startsWith("/profile");
-      navigate(needsCustomer && !userId ? "/shop" : next ?? (role === "admin" ? "/admin/products" : "/shop"), {
+      const needsCustomer =
+        next?.startsWith("/cart") || next?.startsWith("/profile");
+      const roleTarget =
+        role === "admin"
+          ? "/portal-admin/products"
+          : role === "staff"
+            ? "/staff"
+            : "/shop";
+      const target =
+        role === "admin" || role === "staff"
+          ? roleTarget
+          : needsCustomer && !userId
+            ? "/shop"
+            : (next ?? roleTarget);
+      navigate(target, {
         replace: true,
       });
     }
@@ -30,8 +43,7 @@ export function AdminLogin() {
     try {
       const success = await login(username, password);
       if (success) {
-        const next = searchParams.get("next");
-        navigate(next ?? (username === "admin" ? "/admin/products" : "/shop"));
+        // Redirect is centralized in the auth effect after API role is loaded.
       } else {
         setError("Tên đăng nhập hoặc mật khẩu không chính xác");
         setPassword("");

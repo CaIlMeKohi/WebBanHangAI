@@ -20,6 +20,7 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
     brand = params.get('brand')
     size = params.get('size')
     color = params.get('color')
+    tags = params.getlist('tag')
     rating = params.get('rating')
     in_stock = params.get('in_stock')
     min_price = params.get('minPrice')
@@ -27,7 +28,10 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
     sort = params.get('sort')
 
     if category:
-        queryset = queryset.filter(Q(category__slug=category) | Q(category__parent__slug=category))
+        category_filter = Q(category__slug=category) | Q(category__parent__slug=category)
+        if category in {'men', 'women'} and params.get('include_unisex', 'true') in {'true', '1'}:
+            category_filter |= Q(category__slug='unisex') | Q(category__parent__slug='unisex')
+        queryset = queryset.filter(category_filter)
     if params.get('new') in {'true', '1'}:
         queryset = queryset.filter(is_new=True)
     if params.get('sale') in {'true', '1'}:
@@ -47,6 +51,8 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
         queryset = queryset.filter(variants__size=size, variants__is_active=True)
     if color:
         queryset = queryset.filter(variants__color=color, variants__is_active=True)
+    for tag in tags:
+        queryset = queryset.filter(tags__icontains=tag.strip().lower())
     if rating:
         queryset = queryset.filter(average_rating__gte=rating)
     if in_stock in {'true', '1'}:
@@ -62,5 +68,7 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
         queryset = queryset.order_by('-base_price')
     elif sort == 'newest':
         queryset = queryset.order_by('-created_at')
+    else:
+        queryset = queryset.order_by('-is_bestseller', '-is_new', '-created_at', '-product_id')
 
     return queryset.distinct()

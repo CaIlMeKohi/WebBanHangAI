@@ -10,12 +10,14 @@ import {
   type ProductSort,
 } from "../../data/products";
 import { useCatalog } from "../../hooks/useCatalog";
+import { useAdminAuth } from "../../context/AdminAuthContext";
+import { writeRecommendationSearch } from "../../lib/recommendationStorage";
 import { fetchCategories } from "../../lib/api";
 import { formatCurrency } from "../../lib/productPresentation";
 
 const MIN_PRICE = 0;
 const MAX_PRICE = 3_000_000;
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 32;
 
 const sortOptions: Array<{ value: ProductSort; label: string }> = [
   { value: "featured", label: "Nổi bật" },
@@ -30,6 +32,7 @@ function flattenChildCategories(categories: CategoryNode[]) {
 
 export function ProductListing() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { userId } = useAdminAuth();
   const [showFilters, setShowFilters] = useState(true);
   const [priceRange, setPriceRange] = useState([MIN_PRICE, MAX_PRICE]);
   const [selectedSubcategories, setSelectedSubcategories] = useState<string[]>(
@@ -78,7 +81,9 @@ export function ProductListing() {
   }, [activeRootCategory, categories]);
 
   useEffect(() => {
-    const allowedSlugs = new Set(availableSubcategories.map((item) => item.slug));
+    const allowedSlugs = new Set(
+      availableSubcategories.map((item) => item.slug),
+    );
     setSelectedSubcategories((currentValue) =>
       currentValue.filter((slug) => allowedSlugs.has(slug)),
     );
@@ -96,8 +101,18 @@ export function ProductListing() {
       maxPrice: priceRange[1] < MAX_PRICE ? priceRange[1] : undefined,
       sort: sortBy,
       page: currentPage,
+      includeUnisex: category === "men" || category === "women",
     };
-  }, [category, currentPage, isNew, isSale, priceRange, searchQuery, selectedSubcategories, sortBy]);
+  }, [
+    category,
+    currentPage,
+    isNew,
+    isSale,
+    priceRange,
+    searchQuery,
+    selectedSubcategories,
+    sortBy,
+  ]);
 
   const { products, totalCount, isLoading, error } = useCatalog(catalogQuery);
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -163,6 +178,11 @@ export function ProductListing() {
     return "Tất cả sản phẩm";
   })();
 
+  // Persist the most recent search so recommendations page can use it.
+  useEffect(() => {
+    writeRecommendationSearch(searchQuery, userId);
+  }, [searchQuery, userId]);
+
   return (
     <div className="min-h-screen bg-white text-neutral-950 dark:bg-neutral-900 dark:text-white">
       <div className="border-b border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
@@ -180,7 +200,6 @@ export function ProductListing() {
       </div>
 
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200 pb-4 dark:border-neutral-800">
           <button
             onClick={() => setShowFilters((currentValue) => !currentValue)}
@@ -235,7 +254,9 @@ export function ProductListing() {
                     {categories.map((rootCategory) => (
                       <button
                         key={rootCategory.slug}
-                        onClick={() => handleRootCategoryChange(rootCategory.slug)}
+                        onClick={() =>
+                          handleRootCategoryChange(rootCategory.slug)
+                        }
                         className={`rounded-full border px-3 py-2 text-sm transition-colors ${
                           category === rootCategory.slug
                             ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900"
@@ -265,7 +286,9 @@ export function ProductListing() {
                       >
                         <input
                           type="checkbox"
-                          checked={selectedSubcategories.includes(subcategory.slug)}
+                          checked={selectedSubcategories.includes(
+                            subcategory.slug,
+                          )}
                           onChange={() => toggleSubcategory(subcategory.slug)}
                           className="h-4 w-4 rounded border-neutral-300 focus:ring-2 focus:ring-neutral-900"
                         />
@@ -332,7 +355,10 @@ export function ProductListing() {
                     >
                       Trước
                     </button>
-                    {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+                    {Array.from(
+                      { length: totalPages },
+                      (_, index) => index + 1,
+                    ).map((page) => (
                       <button
                         key={page}
                         onClick={() => goToPage(page)}

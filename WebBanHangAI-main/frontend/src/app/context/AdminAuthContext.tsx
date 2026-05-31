@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { loginUser, registerUser, type ApiUser } from "../lib/api";
 
-type AuthRole = "admin" | "user" | null;
+type AuthRole = "admin" | "staff" | "user" | null;
 
 interface RegisteredUser {
   username: string;
@@ -17,20 +17,18 @@ interface AuthContextType {
   role: AuthRole;
   userId: number | null;
   login: (username: string, password: string) => Promise<boolean>;
-  register: (
-    data: {
-      username: string;
-      password: string;
-      full_name: string;
-      phone?: string;
-      gender?: string;
-      birthday?: string;
-      address_line?: string;
-      ward?: string;
-      district?: string;
-      province?: string;
-    },
-  ) => Promise<{
+  register: (data: {
+    username: string;
+    password: string;
+    full_name: string;
+    phone?: string;
+    gender?: string;
+    birthday?: string;
+    address_line?: string;
+    ward?: string;
+    district?: string;
+    province?: string;
+  }) => Promise<{
     success: boolean;
     error?: string;
   }>;
@@ -89,27 +87,77 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     setUserId(userId ?? null);
     setIsLoggedIn(Boolean(username));
     setIsAuthReady(true);
+
+    // If user was already logged in, redirect them to their site area.
+    try {
+      const target =
+        role === "admin"
+          ? "/portal-admin/products"
+          : role === "staff"
+            ? "/staff"
+            : "/shop";
+      const current = window.location.pathname ?? "/";
+      if (!current.startsWith(target)) {
+        // Only redirect when reasonable (avoid interrupting deep links to other areas)
+        window.location.href = target;
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
-  const applyUser = (inputUsername: string, matchedRole: AuthRole, nextUserId?: number | null, access?: string | null) => {
+  const applyUser = (
+    inputUsername: string,
+    matchedRole: AuthRole,
+    nextUserId?: number | null,
+    access?: string | null,
+  ) => {
     setUsername(inputUsername);
     setRole(matchedRole);
     setUserId(nextUserId ?? null);
     setIsLoggedIn(true);
     localStorage.setItem(
       AUTH_STORAGE_KEY,
-      JSON.stringify({ username: inputUsername, role: matchedRole, userId: nextUserId ?? null, access: access ?? null }),
+      JSON.stringify({
+        username: inputUsername,
+        role: matchedRole,
+        userId: nextUserId ?? null,
+        access: access ?? null,
+      }),
     );
+    // Redirect the user immediately after login based on role
+    try {
+      const target =
+        matchedRole === "admin"
+          ? "/portal-admin/products"
+          : matchedRole === "staff"
+            ? "/staff"
+            : "/shop";
+      const current = window.location.pathname ?? "/";
+      if (!current.startsWith(target)) {
+        window.location.href = target;
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   const roleFromApiUser = (user: ApiUser): AuthRole =>
-    user.role === "admin" ? "admin" : "user";
+    user.role === "admin" ? "admin" : user.role === "staff" ? "staff" : "user";
 
-  const login = async (inputUsername: string, inputPassword: string): Promise<boolean> => {
+  const login = async (
+    inputUsername: string,
+    inputPassword: string,
+  ): Promise<boolean> => {
     try {
       const response = await loginUser(inputUsername, inputPassword);
       const apiUser = response.user;
-      applyUser(apiUser.username, roleFromApiUser(apiUser), apiUser.user_id, response.access);
+      applyUser(
+        apiUser.username,
+        roleFromApiUser(apiUser),
+        apiUser.user_id,
+        response.access,
+      );
       return true;
     } catch {
       // DB-backed auth is required for cart, wishlist, orders and recommendations.
@@ -147,7 +195,11 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       !/\d/.test(inputPassword) ||
       !/[^A-Za-z0-9]/.test(inputPassword)
     ) {
-      return { success: false, error: "Mật khẩu cần 8-64 ký tự, có chữ hoa, chữ thường, số và ký tự đặc biệt" };
+      return {
+        success: false,
+        error:
+          "Mật khẩu cần 8-64 ký tự, có chữ hoa, chữ thường, số và ký tự đặc biệt",
+      };
     }
 
     if (normalizedUsername === AUTH_CREDENTIALS.admin.username) {
@@ -183,7 +235,12 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
 
       const nextUsers = [...users, newUser];
       writeRegisteredUsers(nextUsers);
-      applyUser(apiUser.username, roleFromApiUser(apiUser), apiUser.user_id, response.access);
+      applyUser(
+        apiUser.username,
+        roleFromApiUser(apiUser),
+        apiUser.user_id,
+        response.access,
+      );
       return { success: true };
     } catch (error) {
       return {
@@ -215,7 +272,16 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ isAuthReady, isLoggedIn, username, role, userId, login, register, logout }}
+      value={{
+        isAuthReady,
+        isLoggedIn,
+        username,
+        role,
+        userId,
+        login,
+        register,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

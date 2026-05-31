@@ -5,7 +5,7 @@ export function RedirectToLogin() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    navigate("/login", { replace: true });
+    navigate("/portal-admin/login", { replace: true });
   }, [navigate]);
 
   return null;

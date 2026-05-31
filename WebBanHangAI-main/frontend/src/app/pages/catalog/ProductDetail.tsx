@@ -19,7 +19,6 @@ import {
   fetchProductById,
   fetchRelatedProducts,
   fetchWishlist,
-  recordProductEvent,
 } from "../../lib/api";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import { CART_UPDATED_EVENT, addStoredCartItem } from "../../lib/cartStorage";
@@ -76,10 +75,10 @@ export function ProductDetail() {
     async function loadProductDetail() {
       setIsLoading(true);
       try {
-        const [apiProduct, apiRelated] = await Promise.all([
-          fetchProductById(id as string),
-          fetchRelatedProducts(id as string, 4),
-        ]);
+        const apiProduct = await fetchProductById(id as string);
+        const apiRelated = await fetchRelatedProducts(id as string, 4).catch(
+          () => [],
+        );
 
         if (isMounted) {
           setProduct(apiProduct);
@@ -101,17 +100,6 @@ export function ProductDetail() {
       isMounted = false;
     };
   }, [id]);
-
-  useEffect(() => {
-    if (!id) return;
-    void recordProductEvent({
-      user_id: userId,
-      product_id: id,
-      interaction_type: "view",
-      session_id: userId ? undefined : "guest-demo",
-      score: 1,
-    });
-  }, [id, userId]);
 
   useEffect(() => {
     if (!userId || !id) {

@@ -43,12 +43,10 @@ if errorlevel 1 goto :error
 
 set "VENV_PY=venv\Scripts\python.exe"
 
-if not exist "..\frontend\dist\index.html" (
-  echo [INFO] Frontend dist chua co, dang build...
-  pushd ..\frontend
-  npm run build || goto :error
-  popd
-)
+echo [INFO] Build frontend de dong bo source moi nhat...
+pushd ..\frontend
+call npm run build || goto :error
+popd
 
 set "REQ_FILE=requirements.txt"
 if exist "%REQ_FILE%" (
@@ -65,7 +63,13 @@ echo [INFO] Dong bo migration voi database hien co...
 echo [INFO] Nếu database đã có schema, dùng migrate --fake-initial để đánh dấu migrations khởi tạo là đã áp dụng.
 "%VENV_PY%" manage.py migrate --fake-initial || goto :error
 
+echo [INFO] Khoi dong Vite dev server voi hot reload tai http://127.0.0.1:5173 ...
+pushd ..\frontend
+start "WEBBANHANG FRONTEND DEV" /min cmd /c "npm run dev"
+popd
+
 echo [INFO] Khoi dong server tai http://localhost:8000 ...
+echo [INFO] Mo http://127.0.0.1:5173 de frontend tu cap nhat khi sua code.
 "%VENV_PY%" manage.py runserver
 goto :eof
 

@@ -2,7 +2,7 @@ from datetime import timedelta
 import secrets
 
 from django.contrib.auth.hashers import check_password, make_password
-from django.db import transaction
+from django.db import DatabaseError, connection, models, transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -13,14 +13,18 @@ from recommendations.services import get_for_you_recommendations
 
 from products.services.email_service import send_order_status_email, send_password_reset_otp, send_verification_email
 from products.infrastructure.stored_procedures import (
+    low_stock_variants,
     recommendation_performance,
+    run_recommendation_batch,
     report_best_brands,
     report_best_products,
     report_revenue,
     report_revenue_by_payment_method,
 )
 from products.business.serializers import (
+    AdminLowStockThresholdSerializer,
     AdminUserSerializer,
+    AdminUserUpdateSerializer,
     NotificationSerializer,
     OrderDetailSerializer,
     PaymentMethodSerializer,
@@ -62,12 +66,28 @@ def client_ip(request):
     return request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', '')).split(',')[0]
 
 
-def audit(request, action, entity_type, entity_id='', metadata=None):
-    AuditLog.objects.create(actor=getattr(request, 'user', None), action=action, entity_type=entity_type, entity_id=str(entity_id or ''), metadata=metadata or {})
+def audit(request, action, entity_type, entity_id='', metadata=None, old_value=None):
+    AuditLog.objects.create(
+        actor=getattr(request, 'user', None),
+        action=action,
+        entity_type=entity_type,
+        entity_id=str(entity_id or ''),
+        old_value=old_value,
+        metadata=metadata or {},
+        ip_address=client_ip(request),
+        user_agent=request.META.get('HTTP_USER_AGENT', '')[:500],
+    )
 
 
 def notify(user, title, content, notification_type='system'):
     return Notification.objects.create(user=user, title=title, content=content, notification_type=notification_type)
+
+
+def table_exists(table_name):
+    try:
+        return table_name in connection.introspection.table_names()
+    except DatabaseError:
+        return False
 
 
 class MeAPIView(APIView):
@@ -215,13 +235,14 @@ class ReviewCreateAPIView(APIView):
         if rating < 1 or rating > 5:
             return Response({'detail': 'Rating phai tu 1 den 5'}, status=status.HTTP_400_BAD_REQUEST)
         review = Review.objects.create(user=request.user, product=order_item.product, rating=rating, comment=request.data.get('comment', ''))
-        UserInteraction.objects.create(user=request.user, product=order_item.product, interaction_type='review', score=rating)
+        customer = Customer.objects.filter(user=request.user).first()
+        UserInteraction.objects.create(user=customer, product=order_item.product, interaction_type='review', score=rating)
         return Response({'review_id': review.review_id}, status=status.HTTP_201_CREATED)
 
 
 class ProductReviewsAPIView(APIView):
     def get(self, request, product_id):
-        reviews = Review.objects.filter(product_id=product_id).select_related('user').order_by('-created_at')
+        reviews = Review.objects.filter(product_id=product_id, status='visible').select_related('user').order_by('-created_at')
         return Response([
             {
                 'review_id': item.review_id,
@@ -254,10 +275,14 @@ class ReturnRequestListCreateAPIView(APIView):
             return Response({'detail': 'Bat buoc nhap ly do'}, status=status.HTTP_400_BAD_REQUEST)
         if not images:
             return Response({'detail': 'Bat buoc co it nhat 1 anh minh chung'}, status=status.HTTP_400_BAD_REQUEST)
-        item = ReturnRequest.objects.create(user=request.user, order=order, order_item_id=request.data.get('order_item_id'), reason=reason, desired_solution=request.data.get('desired_solution', ''))
-        for image_url in images:
-            ReturnRequestImage.objects.create(return_request=item, image_url=str(image_url)[:500])
-        ReturnStatusHistory.objects.create(return_request=item, from_status='', to_status='pending', changed_by=request.user)
+        item = ReturnRequest.objects.create(
+            user=request.user,
+            order=order,
+            order_item_id=request.data.get('order_item_id'),
+            reason=reason,
+            desired_solution=request.data.get('desired_solution', ''),
+            evidence_image_urls=','.join(str(image_url)[:500] for image_url in images),
+        )
         notify(request.user, 'Da gui yeu cau doi tra', f'Yeu cau #{item.return_id} dang cho xu ly', 'return')
         return Response(ReturnRequestSerializer(item).data, status=status.HTTP_201_CREATED)
 
@@ -268,6 +293,26 @@ class StaffReturnAPIView(APIView):
     def get(self, request):
         items = ReturnRequest.objects.all().order_by('-created_at')
         return Response(ReturnRequestSerializer(items, many=True).data)
+
+
+class StaffOrderListAPIView(APIView):
+    permission_classes = [IsStaff]
+
+    def get(self, request):
+        orders = Order.objects.filter(status__in=['pending', 'confirmed', 'processing']).prefetch_related('items', 'items__product').order_by('-created_at')
+        order_status = request.query_params.get('status')
+        payment_method = request.query_params.get('payment_method')
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+        if order_status:
+            orders = orders.filter(status=order_status)
+        if payment_method:
+            orders = orders.filter(payment_method=payment_method)
+        if from_date:
+            orders = orders.filter(created_at__date__gte=from_date)
+        if to_date:
+            orders = orders.filter(created_at__date__lte=to_date)
+        return Response(OrderDetailSerializer(orders[:200], many=True).data)
 
 
 class StaffReturnStatusAPIView(APIView):
@@ -288,8 +333,7 @@ class StaffReturnStatusAPIView(APIView):
         item.reject_reason = request.data.get('reason', '') if next_status == 'rejected' else item.reject_reason
         item.processed_by = request.user
         item.processed_at = timezone.now()
-        item.save(update_fields=['status', 'reject_reason', 'processed_by', 'processed_at', 'updated_at'])
-        ReturnStatusHistory.objects.create(return_request=item, from_status=old, to_status=next_status, note=request.data.get('reason', ''), changed_by=request.user)
+        item.save(update_fields=['status', 'reject_reason', 'processed_by', 'processed_at'])
         notify(item.user, 'Cap nhat yeu cau doi tra', f'Yeu cau #{item.return_id} da chuyen sang {next_status}', 'return')
         return Response(ReturnRequestSerializer(item).data)
 
@@ -301,16 +345,56 @@ class StaffReviewModerateAPIView(APIView):
         review = Review.objects.filter(review_id=review_id).first()
         if review is None:
             return Response({'detail': 'Review not found'}, status=status.HTTP_404_NOT_FOUND)
-        # Schema hien tai chua co status/moderation reason, nen luu ly do vao sentiment_score null va audit log.
         action = request.data.get('action', 'approve')
+        if action not in {'approve', 'hide'}:
+            return Response({'detail': 'Action phai la approve hoac hide'}, status=status.HTTP_400_BAD_REQUEST)
+        reason = str(request.data.get('reason', '')).strip()
+        if action == 'hide' and not reason:
+            return Response({'detail': 'An danh gia bat buoc ghi ly do'}, status=status.HTTP_400_BAD_REQUEST)
+        review.status = 'visible' if action == 'approve' else 'hidden'
+        review.hidden_reason = reason if action == 'hide' else ''
+        review.moderated_by_staff = request.user
+        review.save(update_fields=['status', 'hidden_reason', 'moderated_by_staff', 'updated_at'])
         audit(request, f'review_{action}', 'review', review_id, {'reason': request.data.get('reason', '')})
         return Response({'detail': 'Da ghi nhan ket qua duyet danh gia'})
+
+
+class StaffReviewListAPIView(APIView):
+    permission_classes = [IsStaff]
+
+    def get(self, request):
+        reviews = Review.objects.select_related('product', 'user').order_by('-created_at')
+        review_status = request.query_params.get('status')
+        if review_status:
+            reviews = reviews.filter(status=review_status)
+        return Response([
+            {
+                'review_id': item.review_id,
+                'product_id': item.product_id,
+                'product_name': item.product.name,
+                'customer_id': item.user_id,
+                'rating': item.rating,
+                'comment': item.comment,
+                'status': item.status,
+                'hidden_reason': item.hidden_reason,
+                'created_at': item.created_at,
+            }
+            for item in reviews[:200]
+        ])
 
 
 class StaffOrderConfirmAPIView(APIView):
     permission_classes = [IsStaff]
 
     def put(self, request, order_id):
+        order = Order.objects.select_related('address').prefetch_related('items__variant').filter(order_id=order_id, status='pending').first()
+        if order is None:
+            return Response({'detail': 'Chi xac nhan don pending ton tai'}, status=status.HTTP_400_BAD_REQUEST)
+        if not order.receiver_phone_snapshot or not order.address_line_snapshot:
+            return Response({'detail': 'Don hang thieu dia chi hoac so dien thoai giao hang'}, status=status.HTTP_400_BAD_REQUEST)
+        for item in order.items.all():
+            if item.variant.stock_quantity < 0:
+                return Response({'detail': f'Ton kho SKU {item.sku_snapshot} khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
         return StaffOrderStatusAPIView().put(request, order_id)
 
 
@@ -336,14 +420,56 @@ class StaffOrderStatusAPIView(APIView):
             tracking = str(request.data.get('tracking_code', '')).strip()
             if not carrier or not tracking:
                 return Response({'detail': 'Can carrier_name va tracking_code khi shipped'}, status=status.HTTP_400_BAD_REQUEST)
-            Shipment.objects.update_or_create(order=order, defaults={'carrier_name': carrier, 'tracking_code': tracking, 'shipment_status': 'shipped', 'shipped_at': timezone.now()})
+            Shipment.objects.update_or_create(order=order, defaults={'carrier_name': carrier, 'tracking_code': tracking, 'shipment_status': 'shipped', 'shipped_at': timezone.now(), 'created_by_staff': request.user})
         old = order.status
         order.status = next_status
         order.save(update_fields=['status', 'updated_at'])
         OrderStatusHistory.objects.create(order=order, from_status=old, to_status=next_status, changed_by=request.user)
-        notify(order.user, 'Cap nhat don hang', f'Don #{order.order_id} da chuyen sang {next_status}', 'order')
-        send_order_status_email(order.user.email, order.order_id, next_status)
+        notify(order.user.user, 'Cap nhat don hang', f'Don #{order.order_id} da chuyen sang {next_status}', 'order')
+        send_order_status_email(order.user.user.email, order.order_id, next_status)
         return Response(OrderDetailSerializer(order).data)
+
+
+class AdminOrderListAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        orders = Order.objects.select_related('user', 'user__user', 'address').prefetch_related('items', 'items__product', 'status_histories').order_by('-created_at')
+        status_filter = request.query_params.get('status')
+        payment_method = request.query_params.get('payment_method')
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+        if status_filter:
+            orders = orders.filter(status=status_filter)
+        if payment_method:
+            orders = orders.filter(payment_method=payment_method)
+        if from_date:
+            orders = orders.filter(created_at__date__gte=from_date)
+        if to_date:
+            orders = orders.filter(created_at__date__lte=to_date)
+        return Response(OrderDetailSerializer(orders[:200], many=True).data)
+
+
+class AdminOrderDetailAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, order_id):
+        order = Order.objects.filter(order_id=order_id).prefetch_related('items', 'items__product', 'status_histories').first()
+        if order is None:
+            return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(OrderDetailSerializer(order).data)
+
+
+class AdminOrderStatusAPIView(StaffOrderStatusAPIView):
+    permission_classes = [IsAdmin]
+
+    def put(self, request, order_id):
+        order = Order.objects.filter(order_id=order_id).first()
+        if order is None:
+            return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        if order.status == 'delivered' and not order.return_requests.exists():
+            return Response({'detail': 'Admin chi can thiep don delivered khi co khieu nai/doi tra'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().put(request, order_id)
 
 
 class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
@@ -378,6 +504,52 @@ class AdminUserUnlockAPIView(AdminUserLockAPIView):
         return Response(AdminUserSerializer(user).data)
 
 
+class AdminUserUpdateDeleteAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def put(self, request, user_id):
+        user = StoreUser.objects.select_for_update().filter(user_id=user_id).first()
+        if user is None:
+            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = AdminUserUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        email = values.get('email')
+        if email and StoreUser.objects.exclude(user_id=user_id).filter(email=email).exists():
+            return Response({'detail': 'Email da duoc su dung'}, status=status.HTTP_400_BAD_REQUEST)
+        full_name = values.pop('full_name', None)
+        for field, value in values.items():
+            setattr(user, field, value)
+        user.save(update_fields=[*values.keys(), 'updated_at'])
+        if full_name is not None and hasattr(user, 'customer_profile'):
+            user.customer_profile.full_name = full_name.strip()
+            user.customer_profile.save(update_fields=['full_name', 'updated_at'])
+        audit(request, 'update_user', 'user', user_id, {'fields': [*values.keys(), *(['full_name'] if full_name is not None else [])]})
+        return Response(AdminUserSerializer(user).data)
+
+    @transaction.atomic
+    def delete(self, request, user_id):
+        if request.user.user_id == user_id:
+            return Response({'detail': 'Admin khong duoc tu xoa tai khoan dang dang nhap'}, status=status.HTTP_400_BAD_REQUEST)
+        user = StoreUser.objects.select_for_update().filter(user_id=user_id).first()
+        if user is None:
+            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        previous_status = user.account_status
+        user.account_status = 'inactive'
+        user.locked_until = None
+        user.save(update_fields=['account_status', 'locked_until', 'updated_at'])
+        audit(
+            request,
+            'delete_user',
+            'user',
+            user_id,
+            {'account_status': 'inactive'},
+            {'account_status': previous_status},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class AdminStaffCreateAPIView(APIView):
     permission_classes = [IsAdmin]
 
@@ -401,6 +573,50 @@ class PaymentMethodViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdmin]
     serializer_class = PaymentMethodSerializer
     queryset = PaymentMethod.objects.all().order_by('code')
+    defaults = [
+        {'method_id': 1, 'code': 'cod', 'name': 'Thanh toan khi nhan hang', 'is_active': True, 'config': {}, 'source': 'payments.method'},
+        {'method_id': 2, 'code': 'vnpay', 'name': 'VNPay', 'is_active': True, 'config': {}, 'source': 'payments.method'},
+        {'method_id': 3, 'code': 'momo', 'name': 'MoMo', 'is_active': True, 'config': {}, 'source': 'payments.method'},
+        {'method_id': 4, 'code': 'bank_transfer', 'name': 'Chuyen khoan ngan hang', 'is_active': True, 'config': {}, 'source': 'payments.method'},
+    ]
+
+    def get_queryset(self):
+        if not table_exists('payment_methods'):
+            return PaymentMethod.objects.none()
+        for item in self.defaults:
+            PaymentMethod.objects.get_or_create(
+                code=item['code'],
+                defaults={'name': item['name'], 'is_active': item['is_active'], 'config': item['config']},
+            )
+        return super().get_queryset()
+
+    def list(self, request, *args, **kwargs):
+        if not table_exists('payment_methods'):
+            usage = {
+                row['payment_method']: row['count']
+                for row in Payment.objects.values('payment_method').annotate(count=models.Count('payment_id'))
+            }
+            rows = [{**item, 'usage_count': usage.get(item['code'], 0)} for item in self.defaults]
+            return Response(rows)
+        return super().list(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        if not table_exists('payment_methods'):
+            return Response({'detail': 'DB hien tai dang luu phuong thuc thanh toan trong payments.method. Can migration payment_methods rieng neu muon bat/tat hoac luu config.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if not table_exists('payment_methods'):
+            return Response({'detail': 'DB hien tai dang luu phuong thuc thanh toan trong payments.method. Can migration payment_methods rieng neu muon bat/tat hoac luu config.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().update(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        item = serializer.save()
+        audit(self.request, 'create_payment_method', 'payment_method', item.method_id)
+
+    def perform_update(self, serializer):
+        item = serializer.save()
+        audit(self.request, 'update_payment_method', 'payment_method', item.method_id)
 
 
 class RecommendationConfigViewSet(viewsets.ModelViewSet):
@@ -408,21 +624,70 @@ class RecommendationConfigViewSet(viewsets.ModelViewSet):
     serializer_class = RecommendationConfigSerializer
     queryset = RecommendationConfig.objects.all().order_by('config_key')
 
+    def get_queryset(self):
+        if not table_exists('recommendation_configs'):
+            return RecommendationConfig.objects.none()
+        return super().get_queryset()
+
+    def list(self, request, *args, **kwargs):
+        if not table_exists('recommendation_configs'):
+            return Response([])
+        return super().list(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        if not table_exists('recommendation_configs'):
+            return Response({'detail': 'DB hien tai chua co bang recommendation_configs. Can migration neu muon luu cau hinh AI.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if not table_exists('recommendation_configs'):
+            return Response({'detail': 'DB hien tai chua co bang recommendation_configs. Can migration neu muon luu cau hinh AI.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().update(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        item = serializer.save()
+        audit(self.request, 'create_recommendation_config', 'recommendation_config', item.config_id)
+
+    def perform_update(self, serializer):
+        item = serializer.save()
+        audit(self.request, 'update_recommendation_config', 'recommendation_config', item.config_id)
+
+
+class AdminLowStockAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        return Response(low_stock_variants())
+
+
+class AdminLowStockThresholdAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    @transaction.atomic
+    def put(self, request):
+        serializer = AdminLowStockThresholdSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        threshold = serializer.validated_data['threshold']
+        variant_id = request.data.get('variant_id')
+        queryset = ProductVariant.objects.select_for_update()
+        if variant_id:
+            updated = queryset.filter(variant_id=variant_id).update(low_stock_threshold=threshold, updated_at=timezone.now())
+        else:
+            updated = queryset.update(low_stock_threshold=threshold, updated_at=timezone.now())
+        audit(request, 'update_low_stock_threshold', 'product_variants', variant_id or 'all', {'threshold': threshold, 'updated': updated})
+        return Response({'updated': updated, 'threshold': threshold})
+
 
 class RunRecommendationAPIView(APIView):
     permission_classes = [IsAdmin]
 
     @transaction.atomic
     def post(self, request):
-        users = StoreUser.objects.filter(role='customer', account_status='active')
-        count = 0
-        for user in users:
-            products = get_for_you_recommendations(str(user.user_id), limit=10)
-            PrecomputedRecommendation.objects.filter(user=user).delete()
-            for index, product in enumerate(products, start=1):
-                PrecomputedRecommendation.objects.create(user=user, product=product, rank=index, score=max(1, 11 - index), reason='Hybrid theo hanh vi, brand/category va do pho bien', algorithm_type='hybrid')
-                count += 1
-        audit(request, 'run_recommendations', 'recommendation_job', metadata={'count': count})
+        top_n = max(1, min(int(request.data.get('top_n', 10)), 100))
+        cold_start_threshold = max(1, min(int(request.data.get('cold_start_threshold', 5)), 100))
+        result = run_recommendation_batch(top_n=top_n, cold_start_threshold=cold_start_threshold)
+        count = int(result.get('generated', 0))
+        audit(request, 'run_recommendations', 'recommendation_job', metadata={'count': count, 'top_n': top_n, 'cold_start_threshold': cold_start_threshold})
         return Response({'generated': count})
 
 
@@ -449,6 +714,21 @@ class ReportsRevenueAPIView(APIView):
         revenue = report_revenue(from_date=from_date, to_date=to_date, group_by=group_by)
         payment_methods = report_revenue_by_payment_method(from_date=from_date, to_date=to_date)
         return Response({'revenue': revenue, 'payment_methods': payment_methods})
+
+
+class ReportsOrderStatusAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        orders = Order.objects.all()
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+        if from_date:
+            orders = orders.filter(created_at__date__gte=from_date)
+        if to_date:
+            orders = orders.filter(created_at__date__lte=to_date)
+        rows = orders.values('status').annotate(count=models.Count('order_id'), total_amount=models.Sum('final_amount')).order_by('status')
+        return Response(list(rows))
 
 
 class ReportsBestProductsAPIView(APIView):
@@ -482,7 +762,19 @@ class RecommendationEventAPIView(APIView):
         product = Product.objects.filter(product_id=product_id, status='active').first()
         if product is None:
             return Response({'detail': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-        RecommendationLog.objects.create(user=request.user, product=product, algorithm_type=event_type, clicked=event_type == 'click')
+        if event_type == 'click':
+            customer = Customer.objects.filter(user=request.user).first()
+            item = RecommendationLog.objects.filter(user=customer, product=product, clicked=False).order_by('-shown_at').first()
+            if item:
+                item.clicked = True
+                item.clicked_at = timezone.now()
+                item.save(update_fields=['clicked', 'clicked_at'])
+            else:
+                RecommendationLog.objects.create(user=customer, product=product, clicked=True, clicked_at=timezone.now())
+        else:
+            customer = Customer.objects.filter(user=request.user).first()
+            recommendation = PrecomputedRecommendation.objects.filter(user=customer, product=product, expires_at__gt=timezone.now()).order_by('-generated_at').first()
+            RecommendationLog.objects.create(user=customer, product=product, recommendation=recommendation)
         return Response({'detail': 'Da ghi log recommendation'})
 
 

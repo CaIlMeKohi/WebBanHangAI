@@ -3,6 +3,7 @@ from django.urls import include, path, re_path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.http import FileResponse, Http404
+from django.views.generic import RedirectView
 from django.views.static import serve
 from products.business.urls import admin_patterns, admin_router, customer_patterns, notification_patterns, payment_patterns, product_review_patterns, recommendation_patterns, return_patterns, review_patterns, staff_patterns
 
@@ -13,7 +14,8 @@ def frontend_index(_request):
     return FileResponse(settings.FRONTEND_INDEX_FILE.open('rb'), content_type='text/html')
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('admin/', RedirectView.as_view(url='/django-admin/', permanent=False)),
+    path('django-admin/', admin.site.urls),
     path('api/auth/', include('products.business.urls', namespace=None)),
     path('api/customer/', include((customer_patterns, 'customer'))),
     path('api/reviews/', include((review_patterns, 'reviews'))),

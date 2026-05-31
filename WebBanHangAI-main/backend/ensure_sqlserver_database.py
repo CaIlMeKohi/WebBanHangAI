@@ -45,17 +45,22 @@ def main() -> None:
         f"{extra_params}"
     )
 
-    with pyodbc.connect(conn_str, autocommit=True) as connection:
-        cursor = connection.cursor()
-        exists = cursor.execute(
-            "SELECT 1 FROM sys.databases WHERE name = ?",
-            database,
-        ).fetchone()
-        if not exists:
-            cursor.execute(f"CREATE DATABASE [{database}]")
-            print(f"[INFO] Created SQL Server database: {database}")
-        else:
-            print(f"[INFO] SQL Server database already exists: {database}")
+    try:
+        with pyodbc.connect(conn_str, autocommit=True) as connection:
+            cursor = connection.cursor()
+            exists = cursor.execute(
+                "SELECT 1 FROM sys.databases WHERE name = ?",
+                database,
+            ).fetchone()
+            if not exists:
+                cursor.execute(f"CREATE DATABASE [{database}]")
+                print(f"[INFO] Created SQL Server database: {database}")
+            else:
+                print(f"[INFO] SQL Server database already exists: {database}")
+    except pyodbc.Error as exc:
+        print(f"[ERROR] Khong the ket noi SQL Server {server}: {exc}")
+        print("[HINT] Kiem tra SQL Server dang chay va credential trong file .env.")
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import {
 import type { Product } from "../../data/products";
 import {
   addCartItem,
+  fetchAddresses,
   fetchOrders,
   fetchCart,
   fetchProductById,
@@ -59,6 +60,18 @@ type CartProduct = Product & {
   color: string;
 };
 
+type UserAddress = {
+  address_id: number;
+  full_name: string;
+  phone: string;
+  address_line: string;
+  ward: string;
+  district: string;
+  province: string;
+  is_default: boolean;
+  created_at: string;
+};
+
 export function Profile() {
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "profile";
@@ -73,6 +86,7 @@ export function Profile() {
   const [cartItems, setCartItems] = useState<CartProduct[]>([]);
   const [wishlistItems, setWishlistItems] = useState<any[]>([]);
   const [selectedWishlistIds, setSelectedWishlistIds] = useState<string[]>([]);
+  const [addresses, setAddresses] = useState<UserAddress[]>([]);
 
   async function loadLocalCartItems() {
     const storedItems = readStoredCart();
@@ -131,13 +145,20 @@ export function Profile() {
 
     async function loadProfileData() {
       try {
-        const [apiProfile, apiOrders, apiWishlist] = await Promise.all([
-          fetchProfile(activeUserId),
-          fetchOrders(activeUserId),
-          fetchWishlist(activeUserId),
-        ]);
-        const apiCart = await fetchCart(activeUserId);
+        const [apiProfile, apiOrders, apiWishlist, apiCart] = await Promise.all(
+          [
+            fetchProfile(activeUserId),
+            fetchOrders(activeUserId),
+            fetchWishlist(activeUserId),
+            fetchCart(activeUserId),
+          ],
+        );
         setProfile(apiProfile);
+        try {
+          setAddresses(await fetchAddresses(activeUserId));
+        } catch {
+          setAddresses([]);
+        }
         setMockOrders(
           apiOrders.map((order) => ({
             id: `ORD-${order.order_id}`,
@@ -176,6 +197,7 @@ export function Profile() {
         }
       } catch {
         setMockOrders([]);
+        setAddresses([]);
         await loadLocalCartItems();
         await loadLocalWishlistItems();
       }
@@ -259,14 +281,14 @@ export function Profile() {
                 <span className="text-sm font-medium">Đơn hàng</span>
               </a>
               <a
-                href="?tab=cart"
+                href="/cart"
                 className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${activeTab === "cart" ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 <ShoppingBag className="w-5 h-5" />
                 <span className="text-sm font-medium">Giỏ hàng</span>
               </a>
               <a
-                href="?tab=wishlist"
+                href="/wishlist"
                 className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${activeTab === "wishlist" ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 <Heart className="w-5 h-5" />
@@ -347,6 +369,45 @@ export function Profile() {
                   >
                     LƯU THAY ĐỔI
                   </button>
+
+                  <div className="mt-8">
+                    <h3 className="mb-4 text-lg font-medium">
+                      Địa chỉ của bạn
+                    </h3>
+                    {addresses.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500 dark:border-neutral-700">
+                        Chưa có địa chỉ nào được lưu.
+                      </div>
+                    ) : (
+                      <div className="grid gap-4 md:grid-cols-2">
+                        {addresses.map((address) => (
+                          <div
+                            key={address.address_id}
+                            className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="font-medium">
+                                {address.full_name}
+                              </div>
+                              {address.is_default && (
+                                <span className="rounded-full bg-neutral-900 px-2 py-1 text-xs text-white dark:bg-white dark:text-neutral-900">
+                                  Mặc định
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-2 space-y-1 text-sm text-neutral-600 dark:text-neutral-400">
+                              <div>{address.phone}</div>
+                              <div>{address.address_line}</div>
+                              <div>
+                                {address.ward}, {address.district},{" "}
+                                {address.province}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -664,91 +725,8 @@ export function Profile() {
                 <h2 className="text-2xl font-light tracking-wide mb-6">
                   Cài đặt tài khoản
                 </h2>
-                <div className="space-y-6">
-                  <div className="bg-neutral-50 dark:bg-neutral-800 p-6 rounded-lg">
-                    <h3 className="font-medium mb-4">Đổi mật khẩu</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">
-                          Mật khẩu hiện tại
-                        </label>
-                        <input
-                          type="password"
-                          className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">
-                          Mật khẩu mới
-                        </label>
-                        <input
-                          type="password"
-                          className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">
-                          Xác nhận mật khẩu mới
-                        </label>
-                        <input
-                          type="password"
-                          className="w-full px-4 py-2 border border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 rounded focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-white"
-                        />
-                      </div>
-                      <button className="px-6 py-3 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-medium tracking-wide hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors">
-                        CẬP NHẬT MẬT KHẨU
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-neutral-50 dark:bg-neutral-800 p-6 rounded-lg">
-                    <h3 className="font-medium mb-4">Thông báo</h3>
-                    <div className="space-y-3">
-                      <label className="flex items-center justify-between cursor-pointer">
-                        <span className="text-sm">
-                          Nhận email về sản phẩm mới
-                        </span>
-                        <input
-                          type="checkbox"
-                          defaultChecked
-                          className="w-5 h-5"
-                        />
-                      </label>
-                      <label className="flex items-center justify-between cursor-pointer">
-                        <span className="text-sm">
-                          Nhận email về khuyến mãi
-                        </span>
-                        <input
-                          type="checkbox"
-                          defaultChecked
-                          className="w-5 h-5"
-                        />
-                      </label>
-                      <label className="flex items-center justify-between cursor-pointer">
-                        <span className="text-sm">
-                          Nhận thông báo về đơn hàng
-                        </span>
-                        <input
-                          type="checkbox"
-                          defaultChecked
-                          className="w-5 h-5"
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="bg-red-50 dark:bg-red-900/20 p-6 rounded-lg">
-                    <h3 className="font-medium text-red-900 dark:text-red-200 mb-2">
-                      Xóa tài khoản
-                    </h3>
-                    <p className="text-sm text-red-700 dark:text-red-300 mb-4">
-                      Hành động này không thể hoàn tác. Tất cả dữ liệu của bạn
-                      sẽ bị xóa vĩnh viễn.
-                    </p>
-                    <button className="px-6 py-3 bg-red-600 text-white font-medium tracking-wide hover:bg-red-700 transition-colors">
-                      XÓA TÀI KHOẢN
-                    </button>
-                  </div>
+                <div className="rounded-lg border border-dashed border-neutral-300 p-6 text-sm text-neutral-500 dark:border-neutral-700">
+                  Mục cài đặt đang để trống để bạn bổ sung chức năng sau.
                 </div>
               </div>
             )}

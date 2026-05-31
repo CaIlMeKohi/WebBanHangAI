@@ -10,6 +10,7 @@ export interface CatalogQuery {
   isSale?: boolean;
   sort?: ProductSort;
   page?: number;
+  includeUnisex?: boolean;
 }
 
 export interface CategoryNode {

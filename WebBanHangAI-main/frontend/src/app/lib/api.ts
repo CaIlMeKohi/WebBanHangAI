@@ -2,8 +2,7 @@ import type { CatalogQuery, Product, CategoryNode } from "../data/products";
 import type { AdminProduct } from "../types/admin";
 
 const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  "/api";
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -18,11 +17,7 @@ async function apiGet<T>(path: string): Promise<T> {
 async function buildApiError(response: Response): Promise<Error> {
   try {
     const data = await response.json();
-    const detail =
-      data.detail ??
-      Object.values(data)
-        .flat()
-        .join(" ");
+    const detail = data.detail ?? Object.values(data).flat().join(" ");
     return new Error(detail || `API error ${response.status}`);
   } catch {
     return new Error(`API error ${response.status}`);
@@ -65,7 +60,8 @@ async function apiDelete(path: string): Promise<void> {
 
 function authHeaders(): HeadersInit {
   try {
-    const raw = localStorage.getItem("siteAuth") ?? localStorage.getItem("adminAuth");
+    const raw =
+      localStorage.getItem("siteAuth") ?? localStorage.getItem("adminAuth");
     const token = raw ? (JSON.parse(raw) as { access?: string }).access : null;
     return token ? { Authorization: `Bearer ${token}` } : {};
   } catch {
@@ -94,6 +90,7 @@ function buildCatalogQuery(query?: CatalogQuery | string): string {
   if (query.maxPrice != null) params.set("maxPrice", String(query.maxPrice));
   if (query.sort) params.set("sort", query.sort);
   if (query.page && query.page > 1) params.set("page", String(query.page));
+  if (query.includeUnisex === false) params.set("include_unisex", "false");
   query.subcategory?.forEach((item) => params.append("subcategory", item));
 
   const queryString = params.toString();
@@ -104,7 +101,9 @@ export async function fetchProducts(
   catalogQuery?: CatalogQuery | string,
 ): Promise<Product[]> {
   const query = buildCatalogQuery(catalogQuery);
-  const response = await apiGet<Product[] | { results: Product[] }>(`/products/${query}`);
+  const response = await apiGet<Product[] | { results: Product[] }>(
+    `/products/${query}`,
+  );
   return Array.isArray(response) ? response : response.results;
 }
 
@@ -121,7 +120,12 @@ export async function fetchProductPage(
   const query = buildCatalogQuery(catalogQuery);
   const response = await apiGet<Product[] | ProductPage>(`/products/${query}`);
   if (Array.isArray(response)) {
-    return { count: response.length, next: null, previous: null, results: response };
+    return {
+      count: response.length,
+      next: null,
+      previous: null,
+      results: response,
+    };
   }
   return response;
 }
@@ -176,6 +180,18 @@ export interface ApiWishlistItem {
   product: Product;
 }
 
+export interface ApiAddress {
+  address_id: number;
+  full_name: string;
+  phone: string;
+  address_line: string;
+  ward: string;
+  district: string;
+  province: string;
+  is_default: boolean;
+  created_at: string;
+}
+
 export interface ApiOrder {
   order_id: number;
   total_amount: number;
@@ -198,19 +214,25 @@ export async function loginUser(
   username: string,
   password: string,
 ): Promise<{ user: ApiUser; access?: string }> {
-  const response = await apiPost<{ user: ApiUser; access?: string }>(`/products/auth/login/`, {
-    username,
-    password,
-  });
+  const response = await apiPost<{ user: ApiUser; access?: string }>(
+    `/products/auth/login/`,
+    {
+      username,
+      password,
+    },
+  );
   return response;
 }
 
 export async function registerUser(
   data: RegisterUserPayload,
 ): Promise<{ user: ApiUser; access?: string }> {
-  const response = await apiPost<{ user: ApiUser; access?: string }>(`/products/auth/register/`, {
-    ...data,
-  });
+  const response = await apiPost<{ user: ApiUser; access?: string }>(
+    `/products/auth/register/`,
+    {
+      ...data,
+    },
+  );
   return response;
 }
 
@@ -257,8 +279,14 @@ export async function deleteCartItem(
   return apiDelete(`/products/cart/${itemId}/?user_id=${userId}`);
 }
 
-export async function fetchWishlist(userId: number): Promise<ApiWishlistItem[]> {
+export async function fetchWishlist(
+  userId: number,
+): Promise<ApiWishlistItem[]> {
   return apiGet<ApiWishlistItem[]>(`/products/wishlist/?user_id=${userId}`);
+}
+
+export async function fetchAddresses(userId: number): Promise<ApiAddress[]> {
+  return apiGet<ApiAddress[]>(`/products/addresses/?user_id=${userId}`);
 }
 
 export async function addWishlistItem(
@@ -287,7 +315,10 @@ export async function createOrder(
   });
 }
 
-export async function confirmMockPayment(orderId: number, provider = "bank_transfer") {
+export async function confirmMockPayment(
+  orderId: number,
+  provider = "bank_transfer",
+) {
   return apiPost(`/payments/${provider}/callback`, {
     order_id: orderId,
     success: true,
@@ -356,6 +387,7 @@ export async function fetchForYouRecommendations(
   userId?: string,
   limitOrSession: number | string = 8,
   maybeLimitOrSession?: number | string,
+  search?: string,
 ): Promise<Product[]> {
   let limit = 8;
   let sessionId = "guest-demo";
@@ -378,7 +410,13 @@ export async function fetchForYouRecommendations(
   } else {
     params.set("session_id", sessionId);
   }
-  return apiGet<Product[]>(`/recommendations/for-you/?${params.toString()}`);
+  if (typeof search === "string" && search.trim()) {
+    params.set("search", search.trim());
+  }
+  const response = await apiGet<Product[] | { results: Product[] }>(
+    `/recommendations/for-you/?${params.toString()}`,
+  );
+  return Array.isArray(response) ? response : response.results;
 }
 
 export async function fetchRelatedProducts(
@@ -386,7 +424,12 @@ export async function fetchRelatedProducts(
   limit = 4,
 ): Promise<Product[]> {
   const params = new URLSearchParams({ limit: String(limit) });
-  return apiGet<Product[]>(
+  const response = await apiGet<Product[] | { results: Product[] }>(
     `/recommendations/related/${productId}/?${params.toString()}`,
   );
+  return Array.isArray(response) ? response : response.results;
+}
+
+export async function recordRecommendationClick(productId: string) {
+  return apiPost(`/recommendations/${productId}/click`, {});
 }

@@ -25,7 +25,7 @@ export function Register() {
 
   useEffect(() => {
     if (isLoggedIn) {
-      navigate(role === "admin" ? "/admin/products" : "/shop", {
+      navigate(role === "admin" ? "/portal-admin/products" : "/shop", {
         replace: true,
       });
     }
@@ -45,7 +45,12 @@ export function Register() {
       return;
     }
 
-    if (!addressLine.trim() || !ward.trim() || !district.trim() || !province.trim()) {
+    if (
+      !addressLine.trim() ||
+      !ward.trim() ||
+      !district.trim() ||
+      !province.trim()
+    ) {
       setError("Vui lòng nhập đầy đủ địa chỉ giao hàng");
       return;
     }
@@ -243,7 +248,10 @@ export function Register() {
           <div className="space-y-2 border-t border-neutral-200 bg-neutral-50 px-6 py-4 text-center text-sm text-neutral-600">
             <p>
               Đã có tài khoản?{" "}
-              <Link to="/login" className="font-medium text-neutral-900 underline">
+              <Link
+                to="/login"
+                className="font-medium text-neutral-900 underline"
+              >
                 Đăng nhập
               </Link>
             </p>

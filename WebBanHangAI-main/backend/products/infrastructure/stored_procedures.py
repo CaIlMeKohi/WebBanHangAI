@@ -39,14 +39,35 @@ def low_stock_variants() -> list[dict]:
     return call_sp('sp_GetLowStockVariants')
 
 
+def hard_delete_product(product_id: int) -> dict:
+    rows = call_sp('sp_HardDeleteProduct', [product_id])
+    return rows[0] if rows else {'deleted': False, 'reason': 'Product could not be deleted.'}
+
+
 def check_variant_stock(variant_id: int, quantity: int) -> dict | None:
     rows = call_sp('sp_CheckVariantStock', [variant_id, quantity])
     return rows[0] if rows else None
 
 
-def decrease_variant_stock(variant_id: int, quantity: int) -> bool:
-    rows = call_sp('sp_DecreaseVariantStock', [variant_id, quantity])
+def decrease_variant_stock(variant_id: int, quantity: int, order_id: int | None = None) -> bool:
+    rows = call_sp('sp_DecreaseVariantStock', [variant_id, quantity, order_id])
     return bool(rows and rows[0].get('affected_rows'))
+
+
+def adjust_variant_stock(
+    variant_id: int,
+    change_quantity: int,
+    staff_user_id: int,
+    action_type: str,
+    reason: str,
+    order_id: int | None = None,
+    note: str | None = None,
+) -> dict | None:
+    rows = call_sp(
+        'sp_AdjustVariantStock',
+        [variant_id, change_quantity, staff_user_id, action_type, reason, order_id, note],
+    )
+    return rows[0] if rows else None
 
 
 def recommendation_performance(from_date=None, to_date=None) -> dict:
@@ -59,3 +80,12 @@ def recommendation_performance(from_date=None, to_date=None) -> dict:
     row['ctr_percent'] = row.get('ctr_percent') or 0
     row.setdefault('conversions', 0)
     return row
+
+
+def generate_customer_recommendations(customer_id: int, top_n=10, cold_start_threshold=5) -> list[dict]:
+    return call_sp('sp_GenerateCustomerRecommendations', [customer_id, top_n, cold_start_threshold])
+
+
+def run_recommendation_batch(top_n=10, cold_start_threshold=5) -> dict:
+    rows = call_sp('sp_RunRecommendationBatch', [top_n, cold_start_threshold])
+    return rows[0] if rows else {'generated': 0}

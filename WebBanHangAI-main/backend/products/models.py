@@ -110,6 +110,7 @@ class Product(models.Model):
     sold_count = models.IntegerField(default=0)
     view_count = models.IntegerField(default=0)
     feature_text = models.TextField(blank=True)
+    tags = models.CharField(max_length=1000, blank=True, default='')
     status = models.CharField(max_length=20, default='active')
     is_new = models.BooleanField(default=False)
     is_bestseller = models.BooleanField(default=False)
@@ -319,10 +320,15 @@ class Review(models.Model):
     review_id = models.AutoField(primary_key=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='reviews')
     user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='reviews')
+    order_item = models.ForeignKey(OrderItem, null=True, blank=True, on_delete=models.SET_NULL, db_column='order_item_id', related_name='reviews')
     rating = models.PositiveSmallIntegerField()
     comment = models.TextField(null=True, blank=True)
-    sentiment_score = models.FloatField(null=True, blank=True)
+    status = models.CharField(max_length=20, default='pending')
+    hidden_reason = models.TextField(blank=True)
+    moderated_by_staff = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='moderated_by_staff_id', related_name='moderated_reviews')
+    image_urls = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'reviews'
@@ -339,7 +345,7 @@ class UserInteraction(models.Model):
     ]
 
     interaction_id = models.BigAutoField(primary_key=True)
-    user = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='interactions')
+    user = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='interactions')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='interactions')
     interaction_type = models.CharField(max_length=20, choices=INTERACTION_TYPE_CHOICES)
     session_id = models.CharField(max_length=100, null=True, blank=True)
@@ -367,13 +373,14 @@ class PrecomputedRecommendation(models.Model):
     ALGO_CHOICES = [('collaborative_filtering', 'Collaborative Filtering'), ('content_based', 'Content Based'), ('hybrid', 'Hybrid')]
 
     rec_id = models.BigAutoField(primary_key=True, db_column='recommendation_id')
-    user = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='precomputed_recommendations')
+    user = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='precomputed_recommendations')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='precomputed_recommendations')
     score = models.FloatField()
     rank = models.IntegerField(db_column='recommendation_rank')
     reason = models.TextField(blank=True)
     algorithm_type = models.CharField(max_length=40, choices=ALGO_CHOICES)
     generated_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'precomputed_recommendations'
@@ -381,12 +388,15 @@ class PrecomputedRecommendation(models.Model):
 
 class RecommendationLog(models.Model):
     log_id = models.BigAutoField(primary_key=True, db_column='recommendation_log_id')
-    user = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='recommendation_logs')
+    user = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='recommendation_logs')
     session_id = models.CharField(max_length=100, null=True, blank=True)
-    algorithm_type = models.CharField(max_length=50)
+    recommendation = models.ForeignKey(PrecomputedRecommendation, null=True, blank=True, on_delete=models.SET_NULL, db_column='recommendation_id', related_name='logs')
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='recommendation_logs')
-    created_at = models.DateTimeField(auto_now_add=True)
+    shown_at = models.DateTimeField(auto_now_add=True)
     clicked = models.BooleanField(default=False)
+    clicked_at = models.DateTimeField(null=True, blank=True)
+    ordered_after_click = models.BooleanField(default=False)
+    converted_order = models.ForeignKey(Order, null=True, blank=True, on_delete=models.SET_NULL, db_column='converted_order_id', related_name='recommendation_conversions')
 
     class Meta:
         db_table = 'recommendation_logs'
@@ -402,6 +412,23 @@ class InventoryLog(models.Model):
 
     class Meta:
         db_table = 'inventory_logs'
+
+
+class StockMovement(models.Model):
+    movement_id = models.BigAutoField(primary_key=True)
+    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, db_column='variant_id', related_name='stock_movements')
+    order = models.ForeignKey(Order, null=True, blank=True, on_delete=models.SET_NULL, db_column='order_id', related_name='stock_movements')
+    staff = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='staff_id', related_name='stock_movements')
+    action_type = models.CharField(max_length=30)
+    quantity_before = models.IntegerField()
+    change_quantity = models.IntegerField()
+    quantity_after = models.IntegerField()
+    reason = models.CharField(max_length=255)
+    note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'stock_movements'
 
 
 class EmailVerificationToken(models.Model):
@@ -451,7 +478,7 @@ class AuditLog(models.Model):
     action = models.CharField(max_length=100)
     entity_type = models.CharField(max_length=100, db_column='target_table')
     entity_id = models.CharField(max_length=100, blank=True, db_column='target_id')
-    old_value = models.TextField(blank=True)
+    old_value = models.JSONField(null=True, blank=True, default=None)
     metadata = models.JSONField(default=dict, blank=True, db_column='new_value')
     ip_address = models.CharField(max_length=64, blank=True)
     user_agent = models.CharField(max_length=500, blank=True)
@@ -464,10 +491,10 @@ class AuditLog(models.Model):
 class OrderStatusHistory(models.Model):
     history_id = models.BigAutoField(primary_key=True)
     order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='order_id', related_name='status_histories')
-    from_status = models.CharField(max_length=20, blank=True)
-    to_status = models.CharField(max_length=20)
+    from_status = models.CharField(max_length=20, blank=True, db_column='old_status')
+    to_status = models.CharField(max_length=20, db_column='new_status')
     note = models.CharField(max_length=500, blank=True)
-    changed_by = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='changed_by', related_name='order_status_changes')
+    changed_by = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='changed_by_user_id', related_name='order_status_changes')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -482,6 +509,7 @@ class Shipment(models.Model):
     shipment_status = models.CharField(max_length=30, default='pending')
     shipped_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
+    created_by_staff = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='created_by_staff_id', related_name='created_shipments')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -492,18 +520,18 @@ class Shipment(models.Model):
 class ReturnRequest(models.Model):
     STATUS_CHOICES = [('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'), ('completed', 'Completed')]
 
-    return_id = models.BigAutoField(primary_key=True)
-    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='user_id', related_name='return_requests')
+    return_id = models.BigAutoField(primary_key=True, db_column='return_request_id')
+    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='return_requests')
     order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='order_id', related_name='return_requests')
     order_item = models.ForeignKey(OrderItem, null=True, blank=True, on_delete=models.SET_NULL, db_column='order_item_id', related_name='return_requests')
     reason = models.TextField()
-    desired_solution = models.CharField(max_length=255, blank=True)
+    desired_solution = models.CharField(max_length=255, blank=True, db_column='requested_action')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    reject_reason = models.TextField(blank=True)
-    processed_by = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='processed_by', related_name='processed_returns')
-    processed_at = models.DateTimeField(null=True, blank=True)
+    reject_reason = models.TextField(blank=True, db_column='resolution_note')
+    processed_by = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='staff_id', related_name='processed_returns')
+    processed_at = models.DateTimeField(null=True, blank=True, db_column='resolved_at')
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    evidence_image_urls = models.TextField(blank=True)
 
     class Meta:
         db_table = 'return_requests'

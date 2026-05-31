@@ -6,6 +6,8 @@ import { ProductCard } from "../../components/catalog/ProductCard";
 import { heroImage, type Product } from "../../data/products";
 import { useCatalog } from "../../hooks/useCatalog";
 import { fetchForYouRecommendations } from "../../lib/api";
+import { useAdminAuth } from "../../context/AdminAuthContext";
+import { readRecommendationSearch } from "../../lib/recommendationStorage";
 
 const collectionTiles = [
   {
@@ -30,6 +32,7 @@ const collectionTiles = [
 
 export function Home() {
   const { products } = useCatalog();
+  const { userId } = useAdminAuth();
   const [aiRecommendations, setAiRecommendations] = useState<Product[]>([]);
 
   useEffect(() => {
@@ -38,8 +41,10 @@ export function Home() {
     async function loadRecommendations() {
       try {
         const recommendations = await fetchForYouRecommendations(
-          "guest-user",
+          userId ? String(userId) : undefined,
           4,
+          "guest-home",
+          readRecommendationSearch(userId),
         );
         if (isMounted) setAiRecommendations(recommendations);
       } catch {
@@ -51,7 +56,7 @@ export function Home() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [userId]);
 
   const newArrivals = useMemo(
     () => products.filter((item) => item.isNew).slice(0, 4),
@@ -200,7 +205,7 @@ function ProductSection({
         {products.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
             {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
+              <ProductCard key={product.id} product={product} isRecommendation={eyebrow === "AI picks"} />
             ))}
           </div>
         ) : (

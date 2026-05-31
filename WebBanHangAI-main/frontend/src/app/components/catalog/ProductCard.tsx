@@ -4,7 +4,7 @@ import { Heart, ShoppingBag, Star } from "lucide-react";
 
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import type { Product } from "../../data/products";
-import { addCartItem, addWishlistItem } from "../../lib/api";
+import { addCartItem, addWishlistItem, recordRecommendationClick } from "../../lib/api";
 import { dispatchCartAddedNotice } from "../../lib/cartNotice";
 import { CART_UPDATED_EVENT, addStoredCartItem } from "../../lib/cartStorage";
 import {
@@ -20,9 +20,10 @@ import {
 
 interface ProductCardProps {
   product: Product;
+  isRecommendation?: boolean;
 }
 
-export function ProductCard({ product }: ProductCardProps) {
+export function ProductCard({ product, isRecommendation = false }: ProductCardProps) {
   const [isLiked, setIsLiked] = useState(false);
   const { userId } = useAdminAuth();
   const navigate = useNavigate();
@@ -87,7 +88,15 @@ export function ProductCard({ product }: ProductCardProps) {
   };
 
   return (
-    <Link to={`/product/${product.id}`} className="group block">
+    <Link
+      to={`/product/${product.id}`}
+      className="group block"
+      onClick={() => {
+        if (isRecommendation && userId) {
+          void recordRecommendationClick(product.id).catch(() => undefined);
+        }
+      }}
+    >
       <div className="relative mb-3 aspect-[4/5] overflow-hidden bg-neutral-100">
         <img
           src={product.image}

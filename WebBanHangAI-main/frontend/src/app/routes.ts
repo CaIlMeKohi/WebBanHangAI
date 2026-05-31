@@ -11,16 +11,20 @@ import { AdminLayout } from "./components/layout/AdminLayout";
 import { AdminLogin } from "./pages/auth/AdminLogin";
 import { AdminProductsRoute } from "./pages/admin/AdminProductsRoute";
 import { RedirectToLogin } from "./pages/auth/RedirectToLogin";
+import { RedirectToWishlist } from "./pages/auth/RedirectToWishlist";
 import { Register } from "./pages/auth/Register";
 import { StaffPortal } from "./pages/staff/StaffPortal";
 import { AdminOperations } from "./pages/admin/AdminOperations";
+import { AdminAccounts } from "./pages/admin/AdminAccounts";
 import { PaymentQr } from "./pages/payment/PaymentQr";
 import { MockPaymentGateway } from "./pages/payment/MockPaymentGateway";
+import { RouteError } from "./pages/RouteError";
 
 export const router = createBrowserRouter([
   {
     path: "/",
     Component: Root,
+    ErrorBoundary: RouteError,
     children: [
       {
         index: true,
@@ -61,7 +65,7 @@ export const router = createBrowserRouter([
     ],
   },
   {
-    path: "/admin/login",
+    path: "/portal-admin/login",
     Component: RedirectToLogin,
   },
   {
@@ -73,12 +77,17 @@ export const router = createBrowserRouter([
     Component: Register,
   },
   {
+    path: "/wishlist",
+    Component: RedirectToWishlist,
+  },
+  {
     path: "/payment-gateway",
     Component: MockPaymentGateway,
   },
   {
-    path: "/admin",
+    path: "/portal-admin",
     Component: AdminLayout,
+    ErrorBoundary: RouteError,
     children: [
       {
         path: "products",
@@ -87,6 +96,10 @@ export const router = createBrowserRouter([
       {
         path: "operations",
         Component: AdminOperations,
+      },
+      {
+        path: "accounts",
+        Component: AdminAccounts,
       },
     ],
   },

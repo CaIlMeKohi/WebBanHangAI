@@ -14,10 +14,10 @@ from rest_framework.views import APIView
 from .application.cart_service import get_customer_cart_items, get_or_create_cart
 from .application.catalog_queries import active_products_queryset, apply_catalog_filters
 from .application.customer_context import get_active_user, get_customer_for_user
-from .infrastructure.stored_procedures import check_variant_stock, decrease_variant_stock, low_stock_variants
+from .infrastructure.stored_procedures import adjust_variant_stock, check_variant_stock, decrease_variant_stock, hard_delete_product, low_stock_variants
 from .security.authentication import create_access_token
 from .services.email_service import send_order_confirmation, send_verification_email
-from .models import Address, Brand, Cart, CartItem, Coupon, Customer, EmailVerificationToken, InventoryLog, LoginLog, Order, OrderItem, Payment, Product, ProductVariant, Category, SearchLog, StoreUser, UserInteraction, WishlistItem
+from .models import Address, Brand, Cart, CartItem, Coupon, Customer, EmailVerificationToken, LoginLog, Order, OrderItem, Payment, Product, ProductVariant, Category, RecommendationLog, SearchLog, StoreUser, UserInteraction, WishlistItem
 from .security.permissions import IsAdmin, IsStaff
 from .serializers import (
     AddressSerializer,
@@ -38,9 +38,9 @@ from .serializers import (
 
 
 class ProductPagination(PageNumberPagination):
-    page_size = 250
+    page_size = 32
     page_size_query_param = 'page_size'
-    max_page_size = 250
+    max_page_size = 100
 
 
 class ProductListAPIView(generics.ListAPIView):
@@ -64,7 +64,7 @@ class ProductListAPIView(generics.ListAPIView):
             first_product = queryset.first()
             if user and first_product:
                 try:
-                    UserInteraction.objects.create(user=user, product=first_product, interaction_type='search', search_query=search[:255], score=0.5)
+                    UserInteraction.objects.create(user=_get_customer(user), product=first_product, interaction_type='search', search_query=search[:255], score=0.5)
                 except DatabaseError:
                     pass
         return queryset
@@ -81,7 +81,7 @@ class ProductDetailAPIView(generics.RetrieveAPIView):
         user = _get_user(request)
         if user:
             try:
-                UserInteraction.objects.create(user=user, product=self.get_object(), interaction_type='view', score=1.0)
+                UserInteraction.objects.create(user=_get_customer(user), product=self.get_object(), interaction_type='view', score=1.0)
             except DatabaseError:
                 pass
         return response
@@ -106,6 +106,16 @@ class ProductAdminUpdateDeleteAPIView(generics.RetrieveUpdateDestroyAPIView):
     lookup_url_kwarg = 'id'
     permission_classes = [IsAdmin]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    def destroy(self, request, *args, **kwargs):
+        product = self.get_object()
+        result = hard_delete_product(product.product_id)
+        if not result.get('deleted'):
+            return Response(
+                {'detail': result.get('reason') or 'Khong the xoa san pham.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class UserEventCreateAPIView(generics.CreateAPIView):
@@ -379,7 +389,7 @@ class CartAPIView(APIView):
             item.quantity += quantity
             item.save(update_fields=['quantity'])
 
-        UserInteraction.objects.create(user=user, product=product, interaction_type='add_to_cart', score=3.0)
+        UserInteraction.objects.create(user=customer, product=product, interaction_type='add_to_cart', score=3.0)
         return Response(CartItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
@@ -427,8 +437,9 @@ class WishlistAPIView(APIView):
         product = Product.objects.filter(product_id=request.data.get('product_id'), status='active').first()
         if product is None:
             return Response({'detail': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-        item, _ = WishlistItem.objects.get_or_create(user=customer, product=product)
-        UserInteraction.objects.create(user=user, product=product, interaction_type='wishlist_add', score=2.5)
+        item, created = WishlistItem.objects.get_or_create(user=customer, product=product)
+        if created:
+            UserInteraction.objects.create(user=customer, product=product, interaction_type='wishlist_add', score=2.5)
         return Response(WishlistItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
@@ -500,9 +511,13 @@ class OrderListCreateAPIView(APIView):
                 subtotal=price * item.quantity,
             )
             if item.variant_id:
-                if not decrease_variant_stock(item.variant.variant_id, item.quantity):
+                if not decrease_variant_stock(item.variant.variant_id, item.quantity, order.order_id):
                     return Response({'detail': f'San pham {item.product.name} khong du ton kho'}, status=status.HTTP_400_BAD_REQUEST)
-            UserInteraction.objects.create(user=user, product=item.product, interaction_type='purchase', score=5.0)
+            UserInteraction.objects.create(user=customer, product=item.product, interaction_type='purchase', score=5.0)
+            RecommendationLog.objects.filter(user=customer, product=item.product, clicked=True, converted_order__isnull=True).update(
+                ordered_after_click=True,
+                converted_order=order,
+            )
 
         Payment.objects.create(order=order, amount=order.final_amount, payment_method=order.payment_method, status='pending')
         CartItem.objects.filter(cart_item_id__in=[item.cart_item_id for item in cart_items], cart__customer=customer).delete()
@@ -658,7 +673,7 @@ class InventoryAdjustAPIView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        variant = ProductVariant.objects.select_for_update().filter(variant_id=request.data.get('variant_id')).first()
+        variant = ProductVariant.objects.filter(variant_id=request.data.get('variant_id')).first()
         if variant is None:
             return Response({'detail': 'Variant not found'}, status=status.HTTP_404_NOT_FOUND)
         try:
@@ -668,9 +683,17 @@ class InventoryAdjustAPIView(APIView):
         reason = str(request.data.get('reason', '')).strip()
         if not reason:
             return Response({'detail': 'Bat buoc nhap ly do dieu chinh kho'}, status=status.HTTP_400_BAD_REQUEST)
-        variant.stock_quantity = max(0, variant.stock_quantity + change)
-        variant.save(update_fields=['stock_quantity', 'updated_at'])
-        InventoryLog.objects.create(product=variant.product, variant=variant, change=change, reason=reason[:100])
+        try:
+            adjust_variant_stock(
+                variant_id=variant.variant_id,
+                change_quantity=change,
+                staff_user_id=request.user.user_id,
+                action_type='import' if change > 0 else 'adjust',
+                reason=reason[:500],
+            )
+        except DatabaseError:
+            return Response({'detail': 'Khong the dieu chinh kho. Vui long kiem tra so luong va thu lai.'}, status=status.HTTP_400_BAD_REQUEST)
+        variant.refresh_from_db()
         return Response(ProductVariantSerializer(variant).data)
 
 
