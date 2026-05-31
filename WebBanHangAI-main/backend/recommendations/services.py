@@ -40,13 +40,18 @@ def _collect_user_preferences(customer_id: int | None, session_id: str | None) -
     product_counter = Counter()
     brand_counter = Counter()
     search_terms = Counter()
+    search_term_recency = {}
+    product_interaction_count = Counter()
+    product_recency = {}
+    category_recency = {}
     interaction_count = 0
     latest_viewed_product_id = None
     latest_viewed_category_slug = None
     latest_viewed_brand_id = None
 
-    for event in events:
+    for event_index, event in enumerate(events):
         interaction_count += 1
+        recency = 300 - event_index
         weight = float(event.score or 1)
         if event.interaction_type == 'search':
             weight = 0.5
@@ -64,19 +69,27 @@ def _collect_user_preferences(customer_id: int | None, session_id: str | None) -
             weight = 5.0
 
         category_counter[event.product.category.slug] += weight
+        category_recency.setdefault(event.product.category.slug, recency)
         if event.product.brand_id:
             brand_counter[event.product.brand_id] += weight
         product_counter[event.product_id] += weight
+        product_interaction_count[event.product_id] += 1
+        product_recency.setdefault(event.product_id, recency)
         if event.interaction_type == 'search' and event.search_query:
             for term in event.search_query.lower().split():
                 if len(term) >= 2:
                     search_terms[term] += weight
+                    search_term_recency.setdefault(term, recency)
 
     return {
         'categories': category_counter,
         'products': product_counter,
         'brands': brand_counter,
         'search_terms': search_terms,
+        'search_term_recency': search_term_recency,
+        'product_interaction_count': product_interaction_count,
+        'product_recency': product_recency,
+        'category_recency': category_recency,
         'interaction_count': interaction_count,
         'latest_viewed_product_id': latest_viewed_product_id,
         'latest_viewed_category_slug': latest_viewed_category_slug,
@@ -132,20 +145,13 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
     if search:
         for term in [t for t in search.lower().split() if len(t) >= 2]:
             preferences['search_terms'][term] += 6
+            preferences['search_term_recency'][term] = 1000
 
     available_variants = ProductVariant.objects.filter(
         product_id=OuterRef('pk'),
         is_active=True,
         stock_quantity__gt=F('stock_reserved'),
     )
-    purchased_products = set()
-    if customer_id is not None:
-        purchased_products = set(
-            Product.objects.filter(
-                order_items__order__user_id=customer_id,
-                order_items__order__status__in=['confirmed', 'processing', 'shipped', 'delivered'],
-            ).values_list('product_id', flat=True)
-        )
     products = list(
         Product.objects.filter(status='active')
         .annotate(has_available_variant=Exists(available_variants))
@@ -171,43 +177,53 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
         )
         return _hydrated_products([product.product_id for product in cold_start[:limit]])
 
-    eligible_products = [
-        product for product in products
-        if product.product_id not in purchased_products
-    ] or products
-
     scored = []
-    for product in eligible_products:
-        score = 0
-
-        score += preferences['categories'][product.category.slug] * 3
-        score += preferences['brands'][product.brand_id] * 2
-        score += preferences['products'][product.product_id] * 4
-        if product.category.slug == preferences['latest_viewed_category_slug']:
-            score += 40
-        if product.brand_id == preferences['latest_viewed_brand_id']:
-            score += 12
-        if product.product_id == preferences['latest_viewed_product_id']:
-            score -= 100
+    for product in products:
         searchable_text = f'{product.name} {product.feature_text} {product.tags}'.lower()
-        score += sum(weight * 8 for term, weight in preferences['search_terms'].items() if term in searchable_text)
+        matching_terms = [
+            term for term in preferences['search_terms']
+            if term in searchable_text
+        ]
+        search_recency = max(
+            (preferences['search_term_recency'][term] for term in matching_terms),
+            default=0,
+        )
+        direct_recency = preferences['product_recency'].get(product.product_id, 0)
+        category_interest = preferences['categories'][product.category.slug]
+        category_recency = preferences['category_recency'].get(product.category.slug, 0)
+        search_interest = sum(preferences['search_terms'][term] for term in matching_terms)
+        brand_interest = preferences['brands'][product.brand_id]
 
+        popularity = 0
         if product.is_bestseller:
-            score += 4
-        score += min(product.sold_count, 100) / 25
-        score += min(product.view_count, 500) / 100
+            popularity += 4
+        popularity += min(product.sold_count, 100) / 25
+        popularity += min(product.view_count, 500) / 100
         if product.is_new:
-            score += 1.5
-        score += int(float(product.average_rating) * 3)
+            popularity += 1.5
+        popularity += int(float(product.average_rating) * 3)
 
-        scored.append((score, product.product_id))
+        # Feed order is intentionally lexicographic: recent behavior first,
+        # then repeated/strong interactions, then category affinity. Popularity
+        # only breaks ties so every customer keeps a distinct real-time feed.
+        rank = (
+            max(direct_recency, search_recency),
+            preferences['products'][product.product_id],
+            preferences['product_interaction_count'][product.product_id],
+            search_interest,
+            category_interest,
+            category_recency,
+            brand_interest,
+            popularity,
+        )
+        scored.append((rank, product.product_id))
 
     scored.sort(key=lambda item: item[0], reverse=True)
     picked_ids = [product_id for _, product_id in scored[:limit]]
     if len(picked_ids) < limit:
         picked_ids.extend(
             product.product_id
-            for product in eligible_products
+            for product in products
             if product.product_id not in picked_ids
         )
 

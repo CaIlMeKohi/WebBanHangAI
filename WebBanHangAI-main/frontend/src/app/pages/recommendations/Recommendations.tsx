@@ -27,7 +27,7 @@ export function Recommendations() {
           undefined;
         const nextProducts = await fetchForYouRecommendations(
           userId ? String(userId) : undefined,
-          12,
+          32,
           undefined,
           search,
         );

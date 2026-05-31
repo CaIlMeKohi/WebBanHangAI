@@ -20,7 +20,7 @@ class ForYouRecommendationsAPIView(APIView):
             limit = int(request.query_params.get('limit', 8))
         except (TypeError, ValueError):
             limit = 8
-        limit = max(1, min(limit, 24))
+        limit = max(1, min(limit, 32))
 
         products = get_for_you_recommendations(user_id=user_id, session_id=session_id, limit=limit, search=search)
         customer = Customer.objects.filter(user_id=user_id, user__account_status='active').first() if user_id else None
