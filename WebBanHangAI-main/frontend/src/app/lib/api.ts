@@ -173,6 +173,10 @@ export interface ApiCartItem {
   quantity: number;
   size: string;
   color: string;
+  unit_price: number;
+  line_total: number;
+  available_stock: number;
+  is_available: boolean;
 }
 
 export interface ApiWishlistItem {
@@ -188,12 +192,21 @@ export interface ApiAddress {
   ward: string;
   district: string;
   province: string;
+  postal_code?: string | null;
   is_default: boolean;
   created_at: string;
 }
 
 export interface ApiOrder {
   order_id: number;
+  order_code: string;
+  receiver_name_snapshot: string;
+  receiver_phone_snapshot: string;
+  address_line_snapshot: string;
+  ward_snapshot: string;
+  district_snapshot: string;
+  province_snapshot: string;
+  postal_code_snapshot?: string | null;
   total_amount: number;
   shipping_fee: number;
   discount_amount: number;
@@ -205,8 +218,15 @@ export interface ApiOrder {
   items: Array<{
     order_item_id: number;
     product: Product;
+    product_name_snapshot: string;
+    brand_name_snapshot: string;
+    category_name_snapshot: string;
+    sku_snapshot: string;
+    color_snapshot: string;
+    size_snapshot: string;
     quantity: number;
     price: number;
+    subtotal: number;
   }>;
 }
 
@@ -289,6 +309,16 @@ export async function fetchAddresses(userId: number): Promise<ApiAddress[]> {
   return apiGet<ApiAddress[]>(`/products/addresses/?user_id=${userId}`);
 }
 
+export async function addAddress(
+  userId: number,
+  data: Omit<ApiAddress, "address_id" | "created_at">,
+): Promise<ApiAddress> {
+  return apiPost<ApiAddress>(`/products/addresses/`, {
+    user_id: userId,
+    ...data,
+  });
+}
+
 export async function addWishlistItem(
   userId: number,
   productId: number | string,
@@ -303,15 +333,25 @@ export async function fetchOrders(userId: number): Promise<ApiOrder[]> {
   return apiGet<ApiOrder[]>(`/products/orders/?user_id=${userId}`);
 }
 
+export interface CreateOrderOptions {
+  paymentMethod?: string;
+  cartItemIds?: number[];
+  addressId?: number;
+  shippingMethod?: "standard" | "express";
+  shippingAddress?: Partial<ApiAddress>;
+}
+
 export async function createOrder(
   userId: number,
-  paymentMethod = "cod",
-  cartItemIds?: number[],
+  options: CreateOrderOptions = {},
 ): Promise<ApiOrder> {
   return apiPost<ApiOrder>(`/products/orders/`, {
     user_id: userId,
-    payment_method: paymentMethod,
-    cart_item_ids: cartItemIds,
+    payment_method: options.paymentMethod ?? "cod",
+    cart_item_ids: options.cartItemIds,
+    address_id: options.addressId,
+    shipping_method: options.shippingMethod ?? "standard",
+    shipping_address: options.shippingAddress,
   });
 }
 

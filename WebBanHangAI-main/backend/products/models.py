@@ -184,6 +184,12 @@ class Cart(models.Model):
 
     class Meta:
         db_table = 'carts'
+        indexes = [
+            models.Index(fields=['customer'], name='idx_carts_customer'),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['customer'], name='uniq_cart_customer'),
+        ]
 
 
 class CartItem(models.Model):
@@ -200,6 +206,14 @@ class CartItem(models.Model):
 
     class Meta:
         db_table = 'cart_items'
+        indexes = [
+            models.Index(fields=['cart'], name='idx_cart_items_cart'),
+            models.Index(fields=['variant'], name='idx_cart_items_variant'),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['cart', 'variant'], name='uniq_cart_variant'),
+            models.CheckConstraint(check=models.Q(quantity__gte=1), name='chk_cart_item_quantity_positive'),
+        ]
 
 
 class WishlistItem(models.Model):
@@ -273,7 +287,10 @@ class Order(models.Model):
 
     class Meta:
         db_table = 'orders'
-        indexes = [models.Index(fields=['user'])]
+        indexes = [
+            models.Index(fields=['user'], name='idx_orders_customer'),
+            models.Index(fields=['user', 'created_at'], name='idx_orders_customer_created'),
+        ]
 
 
 class OrderItem(models.Model):
@@ -293,6 +310,13 @@ class OrderItem(models.Model):
 
     class Meta:
         db_table = 'order_items'
+        indexes = [
+            models.Index(fields=['order'], name='idx_order_items_order'),
+            models.Index(fields=['product'], name='idx_order_items_product'),
+        ]
+        constraints = [
+            models.CheckConstraint(check=models.Q(quantity__gte=1), name='chk_order_item_quantity_positive'),
+        ]
 
 
 class Payment(models.Model):

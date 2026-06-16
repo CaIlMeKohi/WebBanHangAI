@@ -1,15 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import {
-  ArrowRight,
-  CheckCircle2,
-  Minus,
-  Plus,
-  QrCode,
-  ShoppingBag,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ArrowRight, AlertCircle, Minus, Plus, ShoppingBag, Trash2, X } from "lucide-react";
 
 import {
   deleteCartItem,
@@ -18,14 +9,16 @@ import {
   updateCartItem,
   type ApiCartItem,
 } from "../../lib/api";
-import {
-  CART_UPDATED_EVENT,
-  readStoredCart,
-  writeStoredCart,
-} from "../../lib/cartStorage";
+import { CART_UPDATED_EVENT, readStoredCart, writeStoredCart } from "../../lib/cartStorage";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 
-type PaymentMethod = "cod" | "bank_transfer";
+function itemPrice(item: ApiCartItem) {
+  return item.unit_price ?? item.product.price;
+}
+
+function itemLineTotal(item: ApiCartItem) {
+  return item.line_total ?? itemPrice(item) * item.quantity;
+}
 
 export function Cart() {
   const { isAuthReady, userId } = useAdminAuth();
@@ -33,12 +26,8 @@ export function Cart() {
   const [items, setItems] = useState<ApiCartItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [error, setError] = useState("");
-  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cod");
-  const [paidOrder, setPaidOrder] = useState<{
-    orderId: number;
-    amount: number;
-  } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [busyItemId, setBusyItemId] = useState<number | null>(null);
 
   async function loadLocalCartItems() {
     const storedItems = readStoredCart();
@@ -46,14 +35,19 @@ export function Cart() {
       storedItems.map(async (item, index) => {
         try {
           const product = await fetchProductById(item.id);
+          const quantity = Math.max(1, item.quantity);
           return {
             cart_item_id: index + 1,
             product_id: Number(item.id),
             product,
             variant_id: null,
-            quantity: item.quantity,
+            quantity,
             size: item.size,
             color: item.color,
+            unit_price: product.price,
+            line_total: product.price * quantity,
+            available_stock: product.stockQuantity ?? quantity,
+            is_available: (product.stockQuantity ?? quantity) >= quantity,
           } as ApiCartItem;
         } catch {
           return null;
@@ -90,135 +84,136 @@ export function Cart() {
     writeStoredCart(nextItems);
   }
 
+  async function loadCart() {
+    if (!userId) return;
+    setIsLoading(true);
+    setError("");
+    try {
+      const cart = await fetchCart(userId);
+      setItems(cart);
+      setSelectedIds(cart.map((item) => item.cart_item_id));
+    } catch (err) {
+      await loadLocalCartItems();
+      setError(err instanceof Error ? err.message : "Không tải được giỏ hàng từ backend.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!isAuthReady) return;
     if (!userId) {
       navigate(`/login?next=${encodeURIComponent("/cart")}`, { replace: true });
       return;
     }
-
-    let isMounted = true;
-    const activeUserId = userId;
-    async function loadCart() {
-      try {
-        const cart = await fetchCart(activeUserId);
-        if (!isMounted) return;
-        setItems(cart);
-        setSelectedIds(cart.map((item) => item.cart_item_id));
-      } catch {
-        if (isMounted) {
-          await loadLocalCartItems();
-        }
-      }
-    }
     void loadCart();
-    return () => {
-      isMounted = false;
-    };
   }, [isAuthReady, navigate, userId]);
 
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.includes(item.cart_item_id)),
     [items, selectedIds],
   );
-  const subtotal = selectedItems.reduce(
-    (sum, item) => sum + item.product.price * item.quantity,
-    0,
-  );
+  const subtotal = selectedItems.reduce((sum, item) => sum + itemLineTotal(item), 0);
   const shipping = subtotal > 1_000_000 || subtotal === 0 ? 0 : 30_000;
   const total = subtotal + shipping;
+  const hasInvalidSelection = selectedItems.some((item) => !item.is_available);
 
   async function changeQuantity(item: ApiCartItem, delta: number) {
-    if (!userId) return;
-    const nextQuantity = Math.max(1, item.quantity + delta);
+    if (!userId || busyItemId !== null) return;
+    const nextQuantity = item.quantity + delta;
+    if (nextQuantity < 1) return;
+    if (typeof item.available_stock === "number" && nextQuantity > item.available_stock) {
+      setError(`Sản phẩm ${item.product.name} chỉ còn ${item.available_stock} sản phẩm.`);
+      return;
+    }
+
+    setBusyItemId(item.cart_item_id);
+    setError("");
+    const previousItems = items;
     setItems((current) =>
       current.map((candidate) =>
         candidate.cart_item_id === item.cart_item_id
-          ? { ...candidate, quantity: nextQuantity }
+          ? {
+              ...candidate,
+              quantity: nextQuantity,
+              line_total: itemPrice(candidate) * nextQuantity,
+              is_available: !candidate.available_stock || candidate.available_stock >= nextQuantity,
+            }
           : candidate,
       ),
     );
+
     try {
-      await updateCartItem(userId, item.cart_item_id, nextQuantity);
-    } catch {
+      const updated = await updateCartItem(userId, item.cart_item_id, nextQuantity);
+      setItems((current) =>
+        current.map((candidate) => (candidate.cart_item_id === updated.cart_item_id ? updated : candidate)),
+      );
+    } catch (err) {
+      setItems(previousItems);
       writeLocalQuantity(item, nextQuantity);
+      setError(err instanceof Error ? err.message : "Không cập nhật được số lượng.");
+    } finally {
+      setBusyItemId(null);
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
     }
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
   }
 
   async function removeOne(itemId: number) {
-    if (!userId) return;
-    setItems((current) =>
-      current.filter((item) => item.cart_item_id !== itemId),
-    );
+    if (!userId || busyItemId !== null) return;
+    const previousItems = items;
+    setBusyItemId(itemId);
+    setError("");
+    setItems((current) => current.filter((item) => item.cart_item_id !== itemId));
     setSelectedIds((current) => current.filter((id) => id !== itemId));
     try {
       await deleteCartItem(userId, itemId);
-    } catch {
+    } catch (err) {
+      setItems(previousItems);
       removeLocalItemsById([itemId]);
+      setError(err instanceof Error ? err.message : "Không xoá được sản phẩm.");
+    } finally {
+      setBusyItemId(null);
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
     }
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
   }
 
   async function removeSelected() {
-    if (!userId || selectedIds.length === 0) return;
+    if (!userId || selectedIds.length === 0 || busyItemId !== null) return;
     const ids = [...selectedIds];
-    setItems((current) =>
-      current.filter((item) => !ids.includes(item.cart_item_id)),
-    );
+    const previousItems = items;
+    setError("");
+    setItems((current) => current.filter((item) => !ids.includes(item.cart_item_id)));
     setSelectedIds([]);
     try {
       await Promise.all(ids.map((id) => deleteCartItem(userId, id)));
-    } catch {
+    } catch (err) {
+      setItems(previousItems);
       removeLocalItemsById(ids);
+      setError(err instanceof Error ? err.message : "Không xoá được sản phẩm đã chọn.");
+    } finally {
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
     }
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
   }
 
-  function openCheckout() {
+  function goToCheckout() {
     setError("");
     if (selectedIds.length === 0) {
       setError("Vui lòng chọn ít nhất 1 sản phẩm để thanh toán.");
       return;
     }
-    setPaymentMethod("cod");
-    setPaidOrder(null);
-    setIsCheckoutOpen(true);
-  }
-
-  async function submitCheckout() {
-    setError("");
-    try {
-      const orderId = Date.now();
-      setPaidOrder({ orderId, amount: total });
-      if (paymentMethod === "cod") {
-        const ids = [...selectedIds];
-        setItems((current) =>
-          current.filter((item) => !ids.includes(item.cart_item_id)),
-        );
-        setSelectedIds([]);
-        removeLocalItemsById(ids);
-        window.dispatchEvent(new Event(CART_UPDATED_EVENT));
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Không thể thanh toán đơn hàng.",
-      );
+    if (hasInvalidSelection) {
+      setError("Giỏ hàng có sản phẩm hết hàng hoặc không hợp lệ. Vui lòng cập nhật trước khi thanh toán.");
+      return;
     }
+    navigate(`/checkout?items=${selectedIds.join(",")}`);
   }
 
-  async function confirmBankPayment() {
-    if (!paidOrder) return;
-    const ids = [...selectedIds];
-    setItems((current) =>
-      current.filter((item) => !ids.includes(item.cart_item_id)),
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white py-16 text-center dark:bg-neutral-900">
+        <div className="text-sm text-neutral-500">Đang tải giỏ hàng...</div>
+      </div>
     );
-    setSelectedIds([]);
-    setPaidOrder(null);
-    setIsCheckoutOpen(false);
-    removeLocalItemsById(ids);
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
-    navigate("/cart?payment=success");
   }
 
   if (items.length === 0) {
@@ -226,9 +221,7 @@ export function Cart() {
       <div className="min-h-screen bg-white py-16 dark:bg-neutral-900">
         <div className="mx-auto max-w-7xl px-4 text-center">
           <ShoppingBag className="mx-auto mb-4 h-16 w-16 text-neutral-300" />
-          <h2 className="mb-2 text-2xl font-light">
-            Giỏ hàng của bạn đang trống
-          </h2>
+          <h2 className="mb-2 text-2xl font-light">Giỏ hàng của bạn đang trống</h2>
           <p className="mb-8 text-neutral-600 dark:text-neutral-400">
             Thêm sản phẩm để bắt đầu mua sắm.
           </p>
@@ -249,28 +242,31 @@ export function Cart() {
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <h1 className="mb-6 text-3xl font-light tracking-wide">Giỏ hàng</h1>
 
+        {error && (
+          <div className="mb-4 flex items-start gap-2 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={selectedIds.length === items.length}
               onChange={(event) =>
-                setSelectedIds(
-                  event.target.checked
-                    ? items.map((item) => item.cart_item_id)
-                    : [],
-                )
+                setSelectedIds(event.target.checked ? items.map((item) => item.cart_item_id) : [])
               }
             />
             Chọn tất cả
           </label>
           <button
             onClick={() => void removeSelected()}
-            disabled={selectedIds.length === 0}
+            disabled={selectedIds.length === 0 || busyItemId !== null}
             className="inline-flex items-center gap-2 rounded border border-red-200 px-3 py-2 text-sm text-red-700 disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
-            Xóa sản phẩm đã chọn
+            Xoá sản phẩm đã chọn
           </button>
         </div>
 
@@ -279,7 +275,9 @@ export function Cart() {
             {items.map((item) => (
               <div
                 key={item.cart_item_id}
-                className="flex gap-4 border border-neutral-200 p-4 dark:border-neutral-800"
+                className={`flex gap-4 border p-4 ${
+                  item.is_available ? "border-neutral-200" : "border-red-200 bg-red-50"
+                } dark:border-neutral-800`}
               >
                 <input
                   type="checkbox"
@@ -293,32 +291,29 @@ export function Cart() {
                     )
                   }
                 />
-                <Link
-                  to={`/product/${item.product_id}`}
-                  className="flex-shrink-0"
-                >
-                  <img
-                    src={item.product.image}
-                    alt={item.product.name}
-                    className="h-32 w-24 object-cover"
-                  />
+                <Link to={`/product/${item.product_id}`} className="flex-shrink-0">
+                  <img src={item.product.image} alt={item.product.name} className="h-32 w-24 object-cover" />
                 </Link>
                 <div className="min-w-0 flex-1">
                   <div className="mb-2 flex justify-between gap-3">
                     <div>
-                      <Link
-                        to={`/product/${item.product_id}`}
-                        className="font-medium hover:underline"
-                      >
+                      <Link to={`/product/${item.product_id}`} className="font-medium hover:underline">
                         {item.product.name}
                       </Link>
                       <div className="mt-1 text-sm text-neutral-600">
-                        Kích cỡ: {item.size} · Màu: {item.color}
+                        Kích cỡ: {item.size} - Màu: {item.color}
                       </div>
+                      {!item.is_available && (
+                        <div className="mt-2 text-sm text-red-700">
+                          Không đủ tồn kho. Còn lại: {item.available_stock}
+                        </div>
+                      )}
                     </div>
                     <button
                       onClick={() => void removeOne(item.cart_item_id)}
-                      className="rounded p-1 hover:bg-neutral-100"
+                      disabled={busyItemId !== null}
+                      className="rounded p-1 hover:bg-neutral-100 disabled:opacity-50"
+                      title="Xoá sản phẩm"
                     >
                       <X className="h-5 w-5" />
                     </button>
@@ -327,7 +322,9 @@ export function Cart() {
                     <div className="flex items-center border border-neutral-300">
                       <button
                         onClick={() => void changeQuantity(item, -1)}
-                        className="p-2 hover:bg-neutral-50"
+                        disabled={busyItemId !== null || item.quantity <= 1}
+                        className="p-2 hover:bg-neutral-50 disabled:opacity-40"
+                        title="Giảm số lượng"
                       >
                         <Minus className="h-4 w-4" />
                       </button>
@@ -336,20 +333,17 @@ export function Cart() {
                       </span>
                       <button
                         onClick={() => void changeQuantity(item, 1)}
-                        className="p-2 hover:bg-neutral-50"
+                        disabled={busyItemId !== null}
+                        className="p-2 hover:bg-neutral-50 disabled:opacity-40"
+                        title="Tăng số lượng"
                       >
                         <Plus className="h-4 w-4" />
                       </button>
                     </div>
                     <div className="text-right">
-                      <div className="font-medium">
-                        {(item.product.price * item.quantity).toLocaleString(
-                          "vi-VN",
-                        )}{" "}
-                        VND
-                      </div>
+                      <div className="font-medium">{itemLineTotal(item).toLocaleString("vi-VN")} VND</div>
                       <div className="text-sm text-neutral-500">
-                        {item.product.price.toLocaleString("vi-VN")} VND / cái
+                        {itemPrice(item).toLocaleString("vi-VN")} VND / cái
                       </div>
                     </div>
                   </div>
@@ -366,182 +360,28 @@ export function Cart() {
                 <strong>{subtotal.toLocaleString("vi-VN")} VND</strong>
               </div>
               <div className="flex justify-between">
-                <span>Vận chuyển</span>
-                <strong>
-                  {shipping === 0
-                    ? "Miễn phí"
-                    : `${shipping.toLocaleString("vi-VN")} VND`}
-                </strong>
+                <span>Vận chuyển dự kiến</span>
+                <strong>{shipping === 0 ? "Miễn phí" : `${shipping.toLocaleString("vi-VN")} VND`}</strong>
               </div>
             </div>
             <div className="mb-6 border-t border-neutral-200 pt-4">
               <div className="flex items-center justify-between">
                 <span className="text-lg font-medium">Tổng cộng</span>
-                <span className="text-2xl font-light">
-                  {total.toLocaleString("vi-VN")} VND
-                </span>
+                <span className="text-2xl font-light">{total.toLocaleString("vi-VN")} VND</span>
               </div>
             </div>
-            {error && (
-              <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
             <button
-              onClick={openCheckout}
+              onClick={goToCheckout}
               className="mb-3 w-full bg-neutral-900 py-4 font-medium tracking-wide text-white hover:bg-neutral-800"
             >
               Thanh toán
             </button>
-            <Link
-              to="/shop"
-              className="inline-flex items-center gap-2 text-sm font-medium hover:underline"
-            >
+            <Link to="/shop" className="inline-flex items-center gap-2 text-sm font-medium hover:underline">
               Tiếp tục mua sắm
               <ArrowRight className="h-4 w-4" />
             </Link>
           </aside>
         </div>
-      </div>
-
-      {isCheckoutOpen && (
-        <CheckoutModal
-          amount={total}
-          error={error}
-          paidOrder={paidOrder}
-          paymentMethod={paymentMethod}
-          setPaymentMethod={setPaymentMethod}
-          onClose={() => setIsCheckoutOpen(false)}
-          onSubmit={() => void submitCheckout()}
-          onReturn={() => {
-            setIsCheckoutOpen(false);
-            setPaidOrder(null);
-            navigate("/cart");
-          }}
-          onBankPaid={() => void confirmBankPayment()}
-        />
-      )}
-    </div>
-  );
-}
-
-function CheckoutModal({
-  amount,
-  error,
-  paidOrder,
-  paymentMethod,
-  setPaymentMethod,
-  onClose,
-  onSubmit,
-  onReturn,
-  onBankPaid,
-}: {
-  amount: number;
-  error: string;
-  paidOrder: { orderId: number; amount: number } | null;
-  paymentMethod: PaymentMethod;
-  setPaymentMethod: (method: PaymentMethod) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-  onReturn: () => void;
-  onBankPaid: () => void;
-}) {
-  const gatewayUrl = paidOrder
-    ? `${window.location.origin}/payment-gateway?orderId=${paidOrder.orderId}&amount=${paidOrder.amount}&returnTo=${encodeURIComponent("/cart")}`
-    : "";
-  const qrUrl = gatewayUrl
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(gatewayUrl)}`
-    : "";
-
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">
-        <button
-          onClick={onClose}
-          className="absolute right-3 top-3 rounded p-1 hover:bg-neutral-100"
-        >
-          <X className="h-5 w-5" />
-        </button>
-        <h2 className="mb-4 text-xl font-semibold">Thanh toán</h2>
-
-        {!paidOrder && (
-          <>
-            <div className="mb-4 grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setPaymentMethod("cod")}
-                className={`rounded-lg border p-4 text-left ${paymentMethod === "cod" ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200"}`}
-              >
-                <div className="font-medium">Tiền mặt</div>
-                <div className="text-xs opacity-75">COD</div>
-              </button>
-              <button
-                onClick={() => setPaymentMethod("bank_transfer")}
-                className={`rounded-lg border p-4 text-left ${paymentMethod === "bank_transfer" ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200"}`}
-              >
-                <QrCode className="mb-1 h-5 w-5" />
-                <div className="font-medium">Chuyển khoản</div>
-              </button>
-            </div>
-            <div className="mb-4 flex justify-between rounded bg-neutral-50 p-3 text-sm">
-              <span>Tổng thanh toán</span>
-              <strong>{amount.toLocaleString("vi-VN")} VND</strong>
-            </div>
-            {error && (
-              <div className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-            <button
-              onClick={onSubmit}
-              className="w-full rounded bg-neutral-950 py-3 font-medium text-white"
-            >
-              Thanh toán
-            </button>
-          </>
-        )}
-
-        {paidOrder && paymentMethod === "cod" && (
-          <div className="text-center">
-            <CheckCircle2 className="mx-auto mb-3 h-12 w-12 text-emerald-600" />
-            <div className="text-lg font-semibold">Đã thanh toán</div>
-            <p className="mt-2 text-sm text-neutral-600">
-              Đơn #{paidOrder.orderId} đã được ghi nhận thanh toán tiền mặt.
-            </p>
-            <button
-              onClick={onReturn}
-              className="mt-5 w-full rounded bg-neutral-950 py-3 font-medium text-white"
-            >
-              Xác nhận
-            </button>
-          </div>
-        )}
-
-        {paidOrder && paymentMethod === "bank_transfer" && (
-          <div className="text-center">
-            <img
-              src={qrUrl}
-              alt="QR thanh toán"
-              className="mx-auto h-60 w-60"
-            />
-            <p className="mt-2 text-sm text-neutral-600">
-              Quét mã để mở trang thanh toán trên điện thoại.
-            </p>
-            <a
-              href={gatewayUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-3 block rounded border py-2 text-sm"
-            >
-              Mở trang thanh toán
-            </a>
-            <button
-              onClick={onBankPaid}
-              className="mt-3 w-full rounded bg-neutral-950 py-3 font-medium text-white"
-            >
-              Tôi đã thanh toán
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

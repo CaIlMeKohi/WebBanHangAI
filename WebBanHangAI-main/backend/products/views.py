@@ -1,3 +1,4 @@
+from decimal import Decimal
 from datetime import timedelta
 import secrets
 
@@ -230,9 +231,12 @@ def _get_customer(user):
 
 def _available_stock(product, variant=None):
     if variant is not None:
-        stock = check_variant_stock(variant.variant_id, 1)
-        if stock is not None and 'available_stock' in stock:
-            return max(0, int(stock['available_stock']))
+        try:
+            stock = check_variant_stock(variant.variant_id, 1)
+            if stock is not None and 'available_stock' in stock:
+                return max(0, int(stock['available_stock']))
+        except DatabaseError:
+            pass
         return max(0, variant.stock_quantity - variant.stock_reserved)
     return sum(max(0, item.stock_quantity - item.stock_reserved) for item in product.variants.all())
 
@@ -243,6 +247,51 @@ def _variant_label(variant):
     size = variant.size or 'STD'
     color = variant.color or 'Mac dinh'
     return f'{size}/{color}'
+
+
+def _positive_int(value, default=1):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= default else None
+
+
+def _selected_cart_item_ids(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        value = [item for item in value.split(',') if item.strip()]
+    try:
+        ids = [int(item) for item in value]
+    except (TypeError, ValueError):
+        return None
+    return [item for item in ids if item > 0]
+
+
+def _cart_item_price(item):
+    if item.variant_id:
+        return item.variant.price
+    return item.product.base_price
+
+
+def _shipping_fee(subtotal, shipping_method):
+    if shipping_method == 'express':
+        return Decimal('50000')
+    return Decimal('0') if subtotal > Decimal('1000000') or subtotal == 0 else Decimal('30000')
+
+
+def _decrease_stock_for_order(variant, quantity, order_id):
+    try:
+        return decrease_variant_stock(variant.variant_id, quantity, order_id)
+    except DatabaseError:
+        locked_variant = ProductVariant.objects.select_for_update().get(variant_id=variant.variant_id)
+        available_stock = max(0, locked_variant.stock_quantity - locked_variant.stock_reserved)
+        if available_stock < quantity:
+            return False
+        locked_variant.stock_quantity -= quantity
+        locked_variant.save(update_fields=['stock_quantity', 'updated_at'])
+        return True
 
 
 class ProfileAPIView(APIView):
@@ -373,7 +422,9 @@ class CartAPIView(APIView):
         if variant is None:
             return Response({'detail': 'San pham chua co SKU hop le'}, status=status.HTTP_400_BAD_REQUEST)
 
-        quantity = max(1, int(request.data.get('quantity', 1)))
+        quantity = _positive_int(request.data.get('quantity', 1), 1)
+        if quantity is None:
+            return Response({'quantity': 'So luong phai lon hon 0.'}, status=status.HTTP_400_BAD_REQUEST)
         if _available_stock(product, variant) < quantity:
             return Response({'detail': f'Khong du ton kho cho bien the {_variant_label(variant)}'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -387,9 +438,10 @@ class CartAPIView(APIView):
             if _available_stock(product, variant) < item.quantity + quantity:
                 return Response({'detail': f'Khong du ton kho cho bien the {_variant_label(variant)}'}, status=status.HTTP_400_BAD_REQUEST)
             item.quantity += quantity
-            item.save(update_fields=['quantity'])
+            item.save(update_fields=['quantity', 'updated_at'])
 
         UserInteraction.objects.create(user=customer, product=product, interaction_type='add_to_cart', score=3.0)
+        item = get_customer_cart_items(customer).get(cart_item_id=item.cart_item_id)
         return Response(CartItemSerializer(item).data, status=status.HTTP_201_CREATED)
 
 
@@ -400,11 +452,14 @@ class CartItemAPIView(APIView):
         item = CartItem.objects.filter(cart_item_id=item_id, cart__customer=customer).select_related('variant', 'variant__product').first()
         if not item:
             return Response({'detail': 'Cart item not found'}, status=status.HTTP_404_NOT_FOUND)
-        next_quantity = max(1, int(request.data.get('quantity', item.quantity)))
+        next_quantity = _positive_int(request.data.get('quantity', item.quantity), 1)
+        if next_quantity is None:
+            return Response({'quantity': 'So luong phai lon hon 0.'}, status=status.HTTP_400_BAD_REQUEST)
         if _available_stock(item.product, item.variant) < next_quantity:
             return Response({'detail': f'Khong du ton kho cho bien the {_variant_label(item.variant)}'}, status=status.HTTP_400_BAD_REQUEST)
         item.quantity = next_quantity
-        item.save(update_fields=['quantity'])
+        item.save(update_fields=['quantity', 'updated_at'])
+        item = get_customer_cart_items(customer).get(cart_item_id=item.cart_item_id)
         return Response(CartItemSerializer(item).data)
 
     def delete(self, request, item_id):
@@ -459,7 +514,10 @@ class OrderListCreateAPIView(APIView):
         if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        selected_ids = request.data.get('cart_item_ids') or []
+        selected_ids = _selected_cart_item_ids(request.data.get('cart_item_ids'))
+        if selected_ids is None:
+            return Response({'cart_item_ids': 'Danh sach san pham khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
+
         cart_queryset = get_customer_cart_items(customer)
         if selected_ids:
             cart_queryset = cart_queryset.filter(cart_item_id__in=selected_ids)
@@ -467,7 +525,32 @@ class OrderListCreateAPIView(APIView):
         if not cart_items:
             return Response({'detail': 'Cart is empty'}, status=status.HTTP_400_BAD_REQUEST)
 
-        address = Address.objects.filter(user=customer, is_default=True).first()
+        payment_method = str(request.data.get('payment_method', 'cod')).strip()
+        if payment_method not in {'cod', 'bank_transfer', 'vnpay', 'momo'}:
+            return Response({'payment_method': 'Phuong thuc thanh toan khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        shipping_method = str(request.data.get('shipping_method', 'standard')).strip()
+        if shipping_method not in {'standard', 'express'}:
+            return Response({'shipping_method': 'Phuong thuc giao hang khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        address = None
+        address_id = request.data.get('address_id')
+        if address_id:
+            address = Address.objects.filter(user=customer, address_id=address_id).first()
+            if address is None:
+                return Response({'address_id': 'Dia chi giao hang khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        shipping_address = request.data.get('shipping_address') or {}
+        if address is None and shipping_address:
+            serializer = AddressSerializer(data=shipping_address)
+            serializer.is_valid(raise_exception=True)
+            should_default = bool(serializer.validated_data.get('is_default')) or not Address.objects.filter(user=customer).exists()
+            if should_default:
+                Address.objects.filter(user=customer, is_default=True).update(is_default=False)
+            address = serializer.save(user=customer, is_default=should_default)
+
+        if address is None:
+            address = Address.objects.filter(user=customer, is_default=True).first()
         if address is None:
             return Response({'detail': 'Vui long cap nhat dia chi giao hang mac dinh truoc khi dat hang'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -475,8 +558,8 @@ class OrderListCreateAPIView(APIView):
             if _available_stock(item.product, item.variant) < item.quantity:
                 return Response({'detail': f'San pham {item.product.name} khong du ton kho'}, status=status.HTTP_400_BAD_REQUEST)
 
-        subtotal = sum(int(item.variant.price if item.variant_id else item.product.base_price) * item.quantity for item in cart_items)
-        shipping_fee = 0 if subtotal > 1_000_000 else 30_000
+        subtotal = sum(_cart_item_price(item) * item.quantity for item in cart_items)
+        shipping_fee = _shipping_fee(subtotal, shipping_method)
         order = Order.objects.create(
             user=customer,
             address=address,
@@ -492,10 +575,10 @@ class OrderListCreateAPIView(APIView):
             shipping_fee=shipping_fee,
             discount_amount=0,
             final_amount=subtotal + shipping_fee,
-            payment_method=request.data.get('payment_method', 'cod'),
+            payment_method=payment_method,
         )
         for item in cart_items:
-            price = int(item.variant.price if item.variant_id else item.product.base_price)
+            price = _cart_item_price(item)
             OrderItem.objects.create(
                 order=order,
                 product=item.product,
@@ -511,7 +594,7 @@ class OrderListCreateAPIView(APIView):
                 subtotal=price * item.quantity,
             )
             if item.variant_id:
-                if not decrease_variant_stock(item.variant.variant_id, item.quantity, order.order_id):
+                if not _decrease_stock_for_order(item.variant, item.quantity, order.order_id):
                     return Response({'detail': f'San pham {item.product.name} khong du ton kho'}, status=status.HTTP_400_BAD_REQUEST)
             UserInteraction.objects.create(user=customer, product=item.product, interaction_type='purchase', score=5.0)
             RecommendationLog.objects.filter(user=customer, product=item.product, clicked=True, converted_order__isnull=True).update(
@@ -522,6 +605,7 @@ class OrderListCreateAPIView(APIView):
         Payment.objects.create(order=order, amount=order.final_amount, payment_method=order.payment_method, status='pending')
         CartItem.objects.filter(cart_item_id__in=[item.cart_item_id for item in cart_items], cart__customer=customer).delete()
         send_order_confirmation(user.email, order.order_id, order.final_amount)
+        order = Order.objects.prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').get(order_id=order.order_id)
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
 

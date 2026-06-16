@@ -115,77 +115,77 @@ export function AdminOperations() {
   }, []);
 
   async function createStaff() {
-    const email = prompt("Email nhan vien/admin");
-    const password = prompt("Mat khau tam thoi toi thieu 12 ky tu");
-    const role = prompt("Role: staff hoac admin", "staff") ?? "staff";
+    const email = prompt("Email nhân viên/admin");
+    const password = prompt("Mật khẩu tạm thời tối thiểu 12 ký tự");
+    const role = prompt("Role: staff hoặc admin", "staff") ?? "staff";
     if (!email || !password) return;
     await api("/admin/staffs", { method: "POST", body: JSON.stringify({ email, password, role, full_name: email }) });
-    setMessage("Da tao tai khoan");
+    setMessage("Đã tạo tài khoản");
     await load();
   }
 
   async function toggleUser(userId: number, locked: boolean) {
     await api(`/admin/users/${userId}/${locked ? "unlock" : "lock"}`, { method: "PUT", body: "{}" });
-    setMessage(locked ? "Da mo khoa tai khoan" : "Da khoa tai khoan");
+    setMessage(locked ? "Đã mở khóa tài khoản" : "Đã khóa tài khoản");
     await load();
   }
 
   async function updateOrderStatus(order: OrderRow) {
-    const status = prompt("Trang thai moi: confirmed, processing, shipped, delivered, cancelled", order.status);
+    const status = prompt("Trạng thái mới: confirmed, processing, shipped, delivered, cancelled", order.status);
     if (!status || status === order.status) return;
     const body: Record<string, string> = { status };
     if (status === "shipped") {
-      body.carrier_name = prompt("Don vi van chuyen") ?? "";
-      body.tracking_code = prompt("Ma van don") ?? "";
+      body.carrier_name = prompt("Đơn vị vận chuyển") ?? "";
+      body.tracking_code = prompt("Mã vận đơn") ?? "";
     }
     await api(`/admin/orders/${order.order_id}/status`, { method: "PUT", body: JSON.stringify(body) });
-    setMessage("Da cap nhat don hang");
+    setMessage("Đã cập nhật đơn hàng");
     await load();
   }
 
   async function togglePaymentMethod(item: PaymentMethodRow) {
     if (item.source === "payments.method") {
-      setMessage("DB hien tai luu method tren tung payment. Muon bat/tat rieng can them bang payment_methods.");
+      setMessage("DB hiện tại lưu method trên từng payment. Muốn bật/tắt riêng cần thêm bảng payment_methods.");
       return;
     }
     await api(`/admin/payment-methods/${item.method_id}/`, {
       method: "PUT",
       body: JSON.stringify({ code: item.code, name: item.name, is_active: !item.is_active, config: {} }),
     });
-    setMessage("Da cap nhat phuong thuc thanh toan");
+    setMessage("Đã cập nhật phương thức thanh toán");
     await load();
   }
 
   async function updateThreshold() {
-    const threshold = Number(prompt("Nguong ton kho thap moi", "5"));
+    const threshold = Number(prompt("Ngưỡng tồn kho thấp mới", "5"));
     if (!Number.isFinite(threshold) || threshold < 0) return;
     await api("/admin/inventory/low-stock-threshold", { method: "PUT", body: JSON.stringify({ threshold }) });
-    setMessage("Da cap nhat nguong ton kho thap");
+    setMessage("Đã cập nhật ngưỡng tồn kho thấp");
     await load();
   }
 
   async function saveRecommendationConfig() {
-    const config_key = prompt("Key cau hinh", "top_n");
-    const rawValue = prompt("Gia tri JSON", '{"value":10}');
+    const config_key = prompt("Key cấu hình", "top_n");
+    const rawValue = prompt("Giá trị JSON", '{"value":10}');
     if (!config_key || !rawValue) return;
     let config_value: unknown;
     try {
       config_value = JSON.parse(rawValue);
     } catch {
-      setMessage("Gia tri config phai la JSON hop le");
+      setMessage("Giá trị config phải là JSON hợp lệ");
       return;
     }
     await api("/admin/recommendation-configs/", {
       method: "POST",
-      body: JSON.stringify({ config_key, config_value, description: "Cau hinh recommendation tu Admin Portal" }),
+      body: JSON.stringify({ config_key, config_value, description: "Cấu hình recommendation từ Admin Portal" }),
     });
-    setMessage("Da luu cau hinh recommendation");
+    setMessage("Đã lưu cấu hình recommendation");
     await load();
   }
 
   async function runRecommendations() {
     const result = await api<{ generated: number }>("/admin/recommendations/run", { method: "POST", body: "{}" });
-    setMessage(`Da tao ${result.generated} goi y`);
+    setMessage(`Đã tạo ${result.generated} gợi ý`);
     await load();
   }
 
@@ -195,62 +195,62 @@ export function AdminOperations() {
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-neutral-950">Admin Operations</h1>
-            <p className="text-sm text-neutral-500">Quan ly tai khoan, don hang, thanh toan, ton kho, bao cao va goi y AI.</p>
+            <p className="text-sm text-neutral-500">Quản lý tài khoản, đơn hàng, thanh toán, tồn kho, báo cáo và gợi ý AI.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button className="rounded-md border bg-white px-4 py-2" onClick={createStaff}>Tao nhan vien</button>
-            <button className="rounded-md border bg-white px-4 py-2" onClick={updateThreshold}>Nguong ton kho</button>
-            <button className="rounded-md border bg-white px-4 py-2" onClick={saveRecommendationConfig}>Cau hinh AI</button>
-            <button className="rounded-md bg-neutral-950 px-4 py-2 text-white" onClick={runRecommendations}>Chay goi y AI</button>
+            <button className="rounded-md border bg-white px-4 py-2" onClick={createStaff}>Tạo nhân viên</button>
+            <button className="rounded-md border bg-white px-4 py-2" onClick={updateThreshold}>Ngưỡng tồn kho</button>
+            <button className="rounded-md border bg-white px-4 py-2" onClick={saveRecommendationConfig}>Cấu hình AI</button>
+            <button className="rounded-md bg-neutral-950 px-4 py-2 text-white" onClick={runRecommendations}>Chạy gợi ý AI</button>
           </div>
         </header>
 
         {message && <div className="rounded-md border bg-white p-3 text-sm text-neutral-700">{message}</div>}
 
         <section className="grid gap-4 md:grid-cols-5">
-          <Metric label="Tai khoan" value={users.length} />
-          <Metric label="Don hang" value={orders.length} />
+          <Metric label="Tài khoản" value={users.length} />
+          <Metric label="Đơn hàng" value={orders.length} />
           <Metric label="Doanh thu" value={`${revenueTotal.toLocaleString("vi-VN")}d`} />
           <Metric label="CTR AI" value={`${Math.round((recommendations?.ctr ?? 0) * 100)}%`} />
-          <Metric label="Ton kho thap" value={lowStock.length} />
+          <Metric label="Tồn kho thấp" value={lowStock.length} />
         </section>
 
         <section className="grid gap-4 xl:grid-cols-2">
-          <Panel title="Tai khoan">
+          <Panel title="Tài khoản">
             <DataTable rows={users} columns={["user_id", "email", "role", "account_status"]} action={(user) => (
               <button className="rounded border px-2 py-1" onClick={() => toggleUser(user.user_id, user.account_status === "locked")}>
-                {user.account_status === "locked" ? "Mo khoa" : "Khoa"}
+                {user.account_status === "locked" ? "Mở khóa" : "Khóa"}
               </button>
             )} />
           </Panel>
 
-          <Panel title="Don hang">
+          <Panel title="Đơn hàng">
             <DataTable rows={orders} columns={["order_id", "status", "payment_status", "payment_method", "final_amount"]} action={(order) => (
-              <button className="rounded border px-2 py-1" onClick={() => updateOrderStatus(order)}>Cap nhat</button>
+              <button className="rounded border px-2 py-1" onClick={() => updateOrderStatus(order)}>Cập nhật</button>
             )} />
           </Panel>
 
-          <Panel title="Phuong thuc thanh toan">
+          <Panel title="Phương thức thanh toán">
             <DataTable rows={paymentMethods} columns={["code", "name", "is_active", "usage_count"]} action={(item) => (
               <button className="rounded border px-2 py-1" onClick={() => togglePaymentMethod(item)}>
-                {item.source === "payments.method" ? "Xem" : item.is_active ? "An" : "Bat"}
+                {item.source === "payments.method" ? "Xem" : item.is_active ? "Ẩn" : "Bật"}
               </button>
             )} />
           </Panel>
 
-          <Panel title="Cau hinh Recommendation">
+          <Panel title="Cấu hình Recommendation">
             <DataTable rows={configs} columns={["config_key", "config_value", "description"]} />
           </Panel>
         </section>
 
         <section className="grid gap-4 lg:grid-cols-4">
           <ReportBlock title="Doanh thu" rows={revenue} />
-          <ReportBlock title="Trang thai don" rows={orderStatus} />
-          <ReportBlock title="San pham ban chay" rows={bestProducts} />
-          <ReportBlock title="Brand ban chay" rows={bestBrands} />
+          <ReportBlock title="Trạng thái đơn" rows={orderStatus} />
+          <ReportBlock title="Sản phẩm bán chạy" rows={bestProducts} />
+          <ReportBlock title="Brand bán chạy" rows={bestBrands} />
         </section>
 
-        <Panel title="Canh bao ton kho thap">
+        <Panel title="Cảnh báo tồn kho thấp">
           <DataTable rows={lowStock} columns={["variant_id", "sku", "product_name", "stock_quantity", "low_stock_threshold"]} />
         </Panel>
       </div>
@@ -307,7 +307,7 @@ function DataTable<T extends Record<string, any>>({
           ))}
           {!rows.length && (
             <tr>
-              <td className="px-2 py-4 text-neutral-500" colSpan={columns.length + (action ? 1 : 0)}>Chua co du lieu</td>
+              <td className="px-2 py-4 text-neutral-500" colSpan={columns.length + (action ? 1 : 0)}>Chưa có dữ liệu</td>
             </tr>
           )}
         </tbody>
@@ -331,7 +331,7 @@ function ReportBlock({ title, rows }: { title: string; rows: any[] }) {
             ))}
           </div>
         ))}
-        {!rows.length && <div className="text-neutral-500">Chua co du lieu</div>}
+        {!rows.length && <div className="text-neutral-500">Chưa có dữ liệu</div>}
       </div>
     </div>
   );
@@ -339,7 +339,7 @@ function ReportBlock({ title, rows }: { title: string; rows: any[] }) {
 
 function formatCell(value: unknown) {
   if (value == null) return "";
-  if (typeof value === "boolean") return value ? "Bat" : "Tat";
+  if (typeof value === "boolean") return value ? "Bật" : "Tắt";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }

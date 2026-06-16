@@ -266,41 +266,41 @@ export function Profile() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
           <aside className="lg:col-span-1">
             <nav className="space-y-1">
-              <a
-                href="?tab=profile"
+              <Link
+                to="/profile?tab=profile"
                 className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${activeTab === "profile" ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 <User className="w-5 h-5" />
                 <span className="text-sm font-medium">Hồ sơ</span>
-              </a>
-              <a
-                href="?tab=orders"
+              </Link>
+              <Link
+                to="/profile?tab=orders"
                 className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${activeTab === "orders" ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 <Package className="w-5 h-5" />
                 <span className="text-sm font-medium">Đơn hàng</span>
-              </a>
-              <a
-                href="/cart"
+              </Link>
+              <Link
+                to="/profile?tab=cart"
                 className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${activeTab === "cart" ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 <ShoppingBag className="w-5 h-5" />
                 <span className="text-sm font-medium">Giỏ hàng</span>
-              </a>
-              <a
-                href="/wishlist"
+              </Link>
+              <Link
+                to="/profile?tab=wishlist"
                 className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${activeTab === "wishlist" ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 <Heart className="w-5 h-5" />
                 <span className="text-sm font-medium">Yêu thích</span>
-              </a>
-              <a
-                href="?tab=settings"
+              </Link>
+              <Link
+                to="/profile?tab=settings"
                 className={`flex items-center gap-3 px-4 py-3 rounded transition-colors ${activeTab === "settings" ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900" : "hover:bg-neutral-100 dark:hover:bg-neutral-800"}`}
               >
                 <Settings className="w-5 h-5" />
                 <span className="text-sm font-medium">Cài đặt</span>
-              </a>
+              </Link>
             </nav>
           </aside>
 

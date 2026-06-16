@@ -88,22 +88,6 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoggedIn(Boolean(username));
     setIsAuthReady(true);
 
-    // If user was already logged in, redirect them to their site area.
-    try {
-      const target =
-        role === "admin"
-          ? "/portal-admin/products"
-          : role === "staff"
-            ? "/staff"
-            : "/shop";
-      const current = window.location.pathname ?? "/";
-      if (!current.startsWith(target)) {
-        // Only redirect when reasonable (avoid interrupting deep links to other areas)
-        window.location.href = target;
-      }
-    } catch {
-      /* ignore */
-    }
   }, []);
 
   const applyUser = (
@@ -125,21 +109,6 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         access: access ?? null,
       }),
     );
-    // Redirect the user immediately after login based on role
-    try {
-      const target =
-        matchedRole === "admin"
-          ? "/portal-admin/products"
-          : matchedRole === "staff"
-            ? "/staff"
-            : "/shop";
-      const current = window.location.pathname ?? "/";
-      if (!current.startsWith(target)) {
-        window.location.href = target;
-      }
-    } catch {
-      /* ignore */
-    }
   };
 
   const roleFromApiUser = (user: ApiUser): AuthRole =>

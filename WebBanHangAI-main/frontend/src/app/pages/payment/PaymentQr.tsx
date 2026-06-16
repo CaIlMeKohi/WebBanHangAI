@@ -14,20 +14,20 @@ export function PaymentQr() {
       <div className="mx-auto max-w-md rounded-lg border bg-white p-6 shadow-sm">
         <div className="mb-6 flex items-center gap-3">
           <QrCode className="h-6 w-6 text-neutral-900" />
-          <h1 className="text-xl font-semibold text-neutral-950">Quet ma thanh toan</h1>
+          <h1 className="text-xl font-semibold text-neutral-950">Quét mã thanh toán</h1>
         </div>
 
         <div className="rounded-md border bg-neutral-50 p-4 text-center">
-          <img src={qrUrl} alt="Ma QR thanh toan" className="mx-auto h-64 w-64" />
+          <img src={qrUrl} alt="Mã QR thanh toán" className="mx-auto h-64 w-64" />
         </div>
 
         <div className="mt-5 space-y-2 text-sm text-neutral-700">
           <div className="flex justify-between gap-3">
-            <span>Ma don</span>
+            <span>Mã đơn</span>
             <strong>#{orderId}</strong>
           </div>
           <div className="flex justify-between gap-3">
-            <span>So tien</span>
+            <span>Số tiền</span>
             <strong>{amount.toLocaleString("vi-VN")} VND</strong>
           </div>
         </div>
@@ -36,12 +36,12 @@ export function PaymentQr() {
           href={gatewayUrl}
           className="mt-6 block w-full rounded-md bg-neutral-950 px-4 py-3 text-center font-medium text-white"
         >
-          Mo trang thanh toan
+          Mở trang thanh toán
         </a>
 
         <Link to={returnTo} className="mt-4 inline-flex items-center gap-2 text-sm text-neutral-600 hover:text-neutral-950">
           <ArrowLeft className="h-4 w-4" />
-          Quay lai
+          Quay lại
         </Link>
       </div>
     </main>

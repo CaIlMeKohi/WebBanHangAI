@@ -446,6 +446,10 @@ class CartItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     size = serializers.SerializerMethodField()
     color = serializers.SerializerMethodField()
+    unit_price = serializers.SerializerMethodField()
+    line_total = serializers.SerializerMethodField()
+    available_stock = serializers.SerializerMethodField()
+    is_available = serializers.SerializerMethodField()
 
     def get_size(self, obj: CartItem) -> str:
         if obj.variant_id:
@@ -457,9 +461,38 @@ class CartItemSerializer(serializers.ModelSerializer):
             return obj.variant.color or 'Mac dinh'
         return 'Mac dinh'
 
+    def get_unit_price(self, obj: CartItem) -> int:
+        if obj.variant_id:
+            return int(obj.variant.price)
+        return int(obj.product.base_price)
+
+    def get_line_total(self, obj: CartItem) -> int:
+        return self.get_unit_price(obj) * int(obj.quantity)
+
+    def get_available_stock(self, obj: CartItem) -> int:
+        if obj.variant_id:
+            return max(0, obj.variant.stock_quantity - obj.variant.stock_reserved)
+        return 0
+
+    def get_is_available(self, obj: CartItem) -> bool:
+        return self.get_available_stock(obj) >= obj.quantity
+
     class Meta:
         model = CartItem
-        fields = ['cart_item_id', 'product_id', 'product', 'variant_id', 'quantity', 'size', 'color', 'added_at']
+        fields = [
+            'cart_item_id',
+            'product_id',
+            'product',
+            'variant_id',
+            'quantity',
+            'size',
+            'color',
+            'unit_price',
+            'line_total',
+            'available_stock',
+            'is_available',
+            'added_at',
+        ]
 
 
 class WishlistItemSerializer(serializers.ModelSerializer):
@@ -483,7 +516,18 @@ class AddressSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Address
-        fields = ['address_id', 'full_name', 'phone', 'address_line', 'ward', 'district', 'province', 'is_default', 'created_at']
+        fields = [
+            'address_id',
+            'full_name',
+            'phone',
+            'address_line',
+            'ward',
+            'district',
+            'province',
+            'postal_code',
+            'is_default',
+            'created_at',
+        ]
         read_only_fields = ['address_id', 'created_at']
 
 
@@ -492,7 +536,20 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = ['order_item_id', 'product', 'variant_id', 'quantity', 'price']
+        fields = [
+            'order_item_id',
+            'product',
+            'variant_id',
+            'product_name_snapshot',
+            'brand_name_snapshot',
+            'category_name_snapshot',
+            'sku_snapshot',
+            'color_snapshot',
+            'size_snapshot',
+            'quantity',
+            'price',
+            'subtotal',
+        ]
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -502,6 +559,14 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             'order_id',
+            'order_code',
+            'receiver_name_snapshot',
+            'receiver_phone_snapshot',
+            'address_line_snapshot',
+            'ward_snapshot',
+            'district_snapshot',
+            'province_snapshot',
+            'postal_code_snapshot',
             'total_amount',
             'shipping_fee',
             'discount_amount',

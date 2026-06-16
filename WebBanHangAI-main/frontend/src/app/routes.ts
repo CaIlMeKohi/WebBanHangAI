@@ -4,6 +4,7 @@ import { Home } from "./pages/home/Home";
 import { ProductListing } from "./pages/catalog/ProductListing";
 import { ProductDetail } from "./pages/catalog/ProductDetail";
 import { Cart } from "./pages/cart/Cart";
+import { Checkout } from "./pages/checkout/Checkout";
 import { Profile } from "./pages/profile/Profile";
 import { Recommendations } from "./pages/recommendations/Recommendations";
 import { NotFound } from "./pages/NotFound";
@@ -41,6 +42,10 @@ export const router = createBrowserRouter([
       {
         path: "cart",
         Component: Cart,
+      },
+      {
+        path: "checkout",
+        Component: Checkout,
       },
       {
         path: "profile",
