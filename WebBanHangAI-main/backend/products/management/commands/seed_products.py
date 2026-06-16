@@ -1,24 +1,12 @@
-from decimal import Decimal
-
 from django.core.management.base import BaseCommand
-from django.contrib.auth.hashers import make_password
 from django.db import transaction
-from django.utils import timezone
 
 from products.models import (
-    Address,
     Brand,
-    Cart,
-    CartItem,
     Category,
-    Customer,
-    Order,
-    OrderItem,
-    Payment,
     Product,
     ProductImage,
     ProductVariant,
-    StoreUser,
 )
 
 
@@ -233,7 +221,7 @@ SEED_PRODUCTS = [
 
 
 class Command(BaseCommand):
-    help = "Seed categories, brands, products, and sample demo data."
+    help = "Seed categories, brands, and products."
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -324,107 +312,8 @@ class Command(BaseCommand):
             else:
                 updated += 1
 
-        demo = self._seed_checkout_demo()
         self.stdout.write(
             self.style.SUCCESS(
-                f"Seed complete: created={created}, updated={updated}, demo_order={demo.order_id}"
+                f"Seed complete: created={created}, updated={updated}"
             )
         )
-
-    def _seed_checkout_demo(self):
-        user, _ = StoreUser.objects.update_or_create(
-            email="bao.demo@example.com",
-            defaults={
-                "password_hash": make_password("Demo@12345"),
-                "phone": "0900000001",
-                "role": "customer",
-                "account_status": "active",
-                "email_verified_at": timezone.now(),
-            },
-        )
-        customer, _ = Customer.objects.update_or_create(
-            user=user,
-            defaults={
-                "customer_code": f"KH{user.user_id:06d}",
-                "full_name": "Bao Demo",
-                "gender": "unknown",
-            },
-        )
-        address, _ = Address.objects.update_or_create(
-            user=customer,
-            address_line="1 Nguyen Trai",
-            ward="Ben Thanh",
-            district="Quan 1",
-            province="TP Ho Chi Minh",
-            defaults={
-                "full_name": "Bao Demo",
-                "phone": "0900000001",
-                "postal_code": "700000",
-                "is_default": True,
-            },
-        )
-        Address.objects.filter(user=customer).exclude(address_id=address.address_id).update(is_default=False)
-
-        cart, _ = Cart.objects.get_or_create(customer=customer)
-        cart_variants = list(
-            ProductVariant.objects.select_related("product", "product__brand", "product__category")
-            .filter(product__slug__in=["ao-thun-trang-classic", "quan-jean-den-slim-fit"], is_active=True)
-            .order_by("product__slug", "variant_id")[:2]
-        )
-        for variant in cart_variants:
-            CartItem.objects.update_or_create(
-                cart=cart,
-                variant=variant,
-                defaults={"quantity": 1},
-            )
-
-        order_code = "DEMO-CHECKOUT-BAO"
-        order = Order.objects.filter(order_code=order_code).first()
-        if order:
-            return order
-
-        order_variant = (
-            ProductVariant.objects.select_related("product", "product__brand", "product__category")
-            .filter(product__slug="giay-sneaker-da", is_active=True)
-            .order_by("variant_id")
-            .first()
-        )
-        if order_variant is None:
-            order_variant = cart_variants[0]
-
-        price = Decimal(order_variant.price)
-        shipping_fee = Decimal("0") if price > Decimal("1000000") else Decimal("30000")
-        order = Order.objects.create(
-            user=customer,
-            address=address,
-            order_code=order_code,
-            receiver_name_snapshot=address.full_name,
-            receiver_phone_snapshot=address.phone,
-            address_line_snapshot=address.address_line,
-            ward_snapshot=address.ward,
-            district_snapshot=address.district,
-            province_snapshot=address.province,
-            postal_code_snapshot=address.postal_code,
-            total_amount=price,
-            shipping_fee=shipping_fee,
-            discount_amount=Decimal("0"),
-            final_amount=price + shipping_fee,
-            payment_method="cod",
-        )
-        product = order_variant.product
-        OrderItem.objects.create(
-            order=order,
-            product=product,
-            variant=order_variant,
-            product_name_snapshot=product.name,
-            brand_name_snapshot=product.brand.name,
-            category_name_snapshot=product.category.name,
-            sku_snapshot=order_variant.sku,
-            color_snapshot=order_variant.color,
-            size_snapshot=order_variant.size,
-            quantity=1,
-            price=price,
-            subtotal=price,
-        )
-        Payment.objects.create(order=order, amount=order.final_amount, payment_method="cod", status="pending")
-        return order
