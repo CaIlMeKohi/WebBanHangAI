@@ -5,7 +5,7 @@ export function Footer() {
   return (
     <footer className="bg-neutral-900 text-neutral-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           <div>
             <h3 className="text-white text-xl font-light tracking-wider mb-4">
               BKQ
@@ -41,18 +41,6 @@ export function Footer() {
                   Giảm giá
                 </Link>
               </li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="text-white text-sm font-medium tracking-wide mb-4">
-              DỊCH VỤ KHÁCH HÀNG
-            </h4>
-            <ul className="space-y-2">
-              <li><a href="#" className="text-sm hover:text-white transition-colors">Liên hệ</a></li>
-              <li><a href="#" className="text-sm hover:text-white transition-colors">Vận chuyển và đổi trả</a></li>
-              <li><a href="#" className="text-sm hover:text-white transition-colors">Hướng dẫn chọn size</a></li>
-              <li><a href="#" className="text-sm hover:text-white transition-colors">Câu hỏi thường gặp</a></li>
             </ul>
           </div>
 

@@ -1,14 +1,11 @@
 from datetime import timedelta
-from pathlib import Path
 import re
-from uuid import uuid4
 
-from django.conf import settings
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
+
+from products.services.cloudinary_service import upload_product_image
 
 from .models import (
     Address,
@@ -36,6 +33,7 @@ class ProductSerializer(serializers.ModelSerializer):
     image = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     subcategory = serializers.SerializerMethodField()
+    gender = serializers.CharField(read_only=True)
     rating = serializers.FloatField(source='average_rating')
     reviews = serializers.IntegerField(source='review_count')
     colors = serializers.SerializerMethodField()
@@ -68,15 +66,10 @@ class ProductSerializer(serializers.ModelSerializer):
         return fallback.image_url if fallback else ''
 
     def get_category(self, obj: Product) -> str:
-        if obj.category.parent_id:
-            return obj.category.parent.slug
         return obj.category.slug
 
     def get_subcategory(self, obj: Product) -> str:
-        if obj.category.parent_id:
-            return obj.category.slug
-        child = obj.category.children.first()
-        return child.slug if child else obj.category.slug
+        return obj.category.slug
 
     def get_colors(self, obj: Product) -> list[str]:
         colors = []
@@ -107,8 +100,6 @@ class ProductSerializer(serializers.ModelSerializer):
         return [image.image_url for image in obj.images.all()]
 
     def get_categoryName(self, obj: Product) -> str:
-        if obj.category.parent_id:
-            return obj.category.parent.name
         return obj.category.name
 
     def get_subcategoryName(self, obj: Product) -> str:
@@ -134,6 +125,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'categoryName',
             'subcategory',
             'subcategoryName',
+            'gender',
             'rating',
             'reviews',
             'colors',
@@ -156,11 +148,14 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     )
     id = serializers.SerializerMethodField()
     price = serializers.SerializerMethodField()
+    image = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     subcategory = serializers.SerializerMethodField()
+    gender = serializers.ChoiceField(choices=['men', 'women', 'unisex'], required=False)
     stock_quantity = serializers.SerializerMethodField()
     category_id = serializers.PrimaryKeyRelatedField(
-        queryset=Category.objects.all(),
+        queryset=Category.objects.filter(is_active=True),
         source='category',
         write_only=True
     )
@@ -170,7 +165,7 @@ class ProductAdminSerializer(serializers.ModelSerializer):
         allow_null=True,
         write_only=True
     )
-    image_url = serializers.CharField(max_length=500, write_only=True, required=False)
+    upload_image_url = serializers.CharField(max_length=500, write_only=True, required=False, source='image_url')
     image_file = serializers.FileField(write_only=True, required=False, allow_null=True)
 
     class Meta:
@@ -182,10 +177,12 @@ class ProductAdminSerializer(serializers.ModelSerializer):
             'slug',
             'description',
             'price',
+            'image',
             'base_price',
             'category_id',
             'category',
             'subcategory',
+            'gender',
             'brand_id',
             'average_rating',
             'review_count',
@@ -198,6 +195,7 @@ class ProductAdminSerializer(serializers.ModelSerializer):
             'is_bestseller',
             'stock_quantity',
             'image_url',
+            'upload_image_url',
             'image_file',
         ]
         read_only_fields = ['product_id']
@@ -208,33 +206,51 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     def get_price(self, obj: Product) -> int:
         return int(obj.base_price)
 
+    def get_image(self, obj: Product) -> str:
+        primary = obj.images.filter(is_primary=True).first()
+        if primary:
+            return primary.image_url
+        fallback = obj.images.first()
+        return fallback.image_url if fallback else ''
+
+    def get_image_url(self, obj: Product) -> str:
+        return self.get_image(obj)
+
     def get_category(self, obj: Product) -> str:
-        if obj.category.parent_id:
-            return obj.category.parent.slug
         return obj.category.slug
 
     def get_subcategory(self, obj: Product) -> str:
-        if obj.category.parent_id:
-            return obj.category.slug
-        child = obj.category.children.first()
-        return child.slug if child else obj.category.slug
+        return obj.category.slug
 
     def get_stock_quantity(self, obj: Product) -> int:
         return sum(max(0, variant.stock_quantity - variant.stock_reserved) for variant in obj.variants.all())
 
     def _store_uploaded_image(self, uploaded_file) -> str:
-        file_extension = Path(uploaded_file.name).suffix or '.jpg'
-        storage_path = f'uploads/products/{uuid4().hex}{file_extension}'
-        saved_path = default_storage.save(storage_path, ContentFile(uploaded_file.read()))
-        return default_storage.url(saved_path)
+        try:
+            return upload_product_image(uploaded_file)
+        except RuntimeError as exc:
+            raise serializers.ValidationError({'image_file': str(exc)}) from exc
 
     def create(self, validated_data):
         image_url = validated_data.pop('image_url', None)
         image_file = validated_data.pop('image_file', None)
-        product = Product.objects.create(**validated_data)
-        
+        stock_quantity = self._input_stock_quantity(default=0)
+
         if image_file is not None:
             image_url = self._store_uploaded_image(image_file)
+
+        product = Product.objects.create(**validated_data)
+        ProductVariant.objects.create(
+            product=product,
+            sku=self._default_sku(product),
+            color='Mặc định',
+            size='STD',
+            price=product.base_price,
+            stock_quantity=stock_quantity,
+            stock_reserved=0,
+            low_stock_threshold=5,
+            is_active=True,
+        )
 
         if image_url:
             ProductImage.objects.create(
@@ -248,13 +264,35 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         image_url = validated_data.pop('image_url', None)
         image_file = validated_data.pop('image_file', None)
+        stock_quantity = self._input_stock_quantity(default=None)
+
+        if image_file is not None:
+            image_url = self._store_uploaded_image(image_file)
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        
-        if image_file is not None:
-            image_url = self._store_uploaded_image(image_file)
+
+        if stock_quantity is not None:
+            variant = instance.variants.order_by('variant_id').first()
+            if variant is None:
+                ProductVariant.objects.create(
+                    product=instance,
+                    sku=self._default_sku(instance),
+                    color='Mặc định',
+                    size='STD',
+                    price=instance.base_price,
+                    stock_quantity=stock_quantity,
+                    stock_reserved=0,
+                    low_stock_threshold=5,
+                    is_active=True,
+                )
+            else:
+                variant.stock_quantity = stock_quantity
+                variant.price = instance.base_price
+                if not variant.low_stock_threshold or variant.low_stock_threshold < 5:
+                    variant.low_stock_threshold = 5
+                variant.save(update_fields=['stock_quantity', 'price', 'low_stock_threshold', 'updated_at'])
 
         if image_url:
             instance.images.filter(is_primary=True).delete()
@@ -265,6 +303,22 @@ class ProductAdminSerializer(serializers.ModelSerializer):
             )
         
         return instance
+
+    def _input_stock_quantity(self, default=None):
+        raw_value = getattr(self, 'initial_data', {}).get('stock_quantity', default)
+        if raw_value in (None, ''):
+            return default
+        try:
+            return max(0, int(raw_value))
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({'stock_quantity': 'Ton kho phai la so nguyen khong am'})
+
+    def _default_sku(self, product):
+        base = ''.join(ch for ch in product.slug.upper() if ch.isalnum())[:32] or f'P{product.product_id}'
+        sku = f'{base}-STD'
+        if not ProductVariant.objects.filter(sku=sku).exists():
+            return sku
+        return f'{base}-{product.product_id}-STD'
 
 
 class UserProductEventSerializer(serializers.ModelSerializer):
@@ -302,13 +356,18 @@ class CategorySerializer(serializers.ModelSerializer):
         return obj.parent.slug if obj.parent_id else None
 
     def get_productCount(self, obj: Category) -> int:
-        if obj.parent_id:
-            return obj.products.filter(status='active').count()
-        return Product.objects.filter(status='active').filter(Q(category=obj) | Q(category__parent=obj)).count()
+        category_ids = self._category_ids_with_descendants(obj)
+        return Product.objects.filter(category_id__in=category_ids, status='active').count()
 
     def get_children(self, obj: Category) -> list[dict]:
         children = obj.children.all().order_by('name')
         return CategorySerializer(children, many=True).data
+
+    def _category_ids_with_descendants(self, obj: Category) -> list[int]:
+        category_ids = [obj.category_id]
+        for child in obj.children.all():
+            category_ids.extend(self._category_ids_with_descendants(child))
+        return category_ids
 
     class Meta:
         model = Category
@@ -423,18 +482,29 @@ class ProductVariantSerializer(serializers.ModelSerializer):
 
 
 class CouponSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
+
     class Meta:
         model = Coupon
         fields = [
             'coupon_id',
+            'name',
             'code',
             'discount_type',
             'discount_value',
             'min_order_amount',
             'max_discount',
+            'category',
+            'category_name',
+            'product',
+            'product_name',
             'expiry_date',
+            'start_at',
+            'end_at',
             'usage_limit',
             'used_count',
+            'per_customer_limit',
             'is_active',
             'created_at',
         ]
@@ -492,16 +562,54 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = ['order_item_id', 'product', 'variant_id', 'quantity', 'price']
+        fields = [
+            'order_item_id',
+            'product',
+            'variant_id',
+            'quantity',
+            'price',
+            'subtotal',
+            'product_name_snapshot',
+            'brand_name_snapshot',
+            'category_name_snapshot',
+            'sku_snapshot',
+            'color_snapshot',
+            'size_snapshot',
+        ]
 
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
+    customer = serializers.SerializerMethodField()
+    shipping_address = serializers.SerializerMethodField()
+
+    def get_customer(self, obj: Order) -> dict:
+        customer = obj.user
+        user = customer.user if customer else None
+        return {
+            'customer_id': customer.customer_id if customer else None,
+            'full_name': customer.full_name if customer else '',
+            'email': user.email if user else '',
+            'phone': user.phone if user else '',
+            'customer_code': customer.customer_code if customer else '',
+        }
+
+    def get_shipping_address(self, obj: Order) -> dict:
+        return {
+            'receiver_name': obj.receiver_name_snapshot,
+            'receiver_phone': obj.receiver_phone_snapshot,
+            'address_line': obj.address_line_snapshot,
+            'ward': obj.ward_snapshot,
+            'district': obj.district_snapshot,
+            'province': obj.province_snapshot,
+        }
 
     class Meta:
         model = Order
         fields = [
             'order_id',
+            'customer',
+            'shipping_address',
             'total_amount',
             'shipping_fee',
             'discount_amount',

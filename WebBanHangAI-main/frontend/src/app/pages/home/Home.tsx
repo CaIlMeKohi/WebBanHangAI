@@ -11,19 +11,19 @@ import { readRecommendationSearch } from "../../lib/recommendationStorage";
 
 const collectionTiles = [
   {
-    title: "Women",
-    href: "/shop?category=women",
+    title: "Đồ nữ",
+    href: "/shop?gender=women",
     image:
       "https://images.unsplash.com/photo-1769107805528-964f4de0e342?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
   },
   {
-    title: "Men",
-    href: "/shop?category=men",
+    title: "Đồ nam",
+    href: "/shop?gender=men",
     image:
       "https://images.unsplash.com/photo-1722926628555-252c1c0258bf?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
   },
   {
-    title: "New In",
+    title: "Hàng mới",
     href: "/shop?new=true",
     image:
       "https://images.unsplash.com/photo-1618677603544-51162346e165?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
@@ -69,7 +69,7 @@ export function Home() {
   const fallbackRow = products.slice(0, 4);
 
   return (
-    <div className="bg-white text-neutral-950">
+    <div className="bg-white text-neutral-950 transition-colors dark:bg-neutral-950 dark:text-white">
       <section className="relative min-h-[calc(100vh-64px)] overflow-hidden">
         <img
           src={heroImage}
@@ -81,10 +81,10 @@ export function Home() {
           <div className="mx-auto w-full max-w-7xl px-4 pb-12 sm:px-6 lg:px-8">
             <div className="max-w-2xl text-white">
               <div className="mb-4 text-xs font-medium uppercase tracking-[0.25em]">
-                Curated fashion store
+                Cửa hàng thời trang chọn lọc
               </div>
               <h1 className="mb-5 text-5xl font-light leading-none tracking-wide md:text-7xl">
-                The everyday edit.
+                Phong cách mỗi ngày.
               </h1>
               <p className="mb-8 max-w-xl text-base leading-7 text-white/85">
                 Chọn nhanh các sản phẩm đang bán, lọc theo bộ sưu tập, xem chi
@@ -95,14 +95,14 @@ export function Home() {
                   to="/shop"
                   className="inline-flex items-center gap-2 bg-white px-6 py-3 text-sm font-medium uppercase tracking-wide text-neutral-950 transition-colors hover:bg-neutral-950 hover:text-white"
                 >
-                  Shop all
+                  Mua sắm ngay
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link
                   to="/danh-cho-ban"
                   className="inline-flex items-center gap-2 border border-white/70 px-6 py-3 text-sm font-medium uppercase tracking-wide text-white transition-colors hover:bg-white hover:text-neutral-950"
                 >
-                  AI picks
+                  Gợi ý AI
                   <Sparkles className="h-4 w-4" />
                 </Link>
               </div>
@@ -114,10 +114,10 @@ export function Home() {
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
-            <div className="mb-2 text-xs uppercase tracking-[0.22em] text-neutral-500">
-              Shop by mood
+            <div className="mb-2 text-xs uppercase tracking-[0.22em] text-neutral-500 dark:text-neutral-400">
+              Mua theo phong cách
             </div>
-            <h2 className="text-3xl font-light tracking-wide">Collections</h2>
+            <h2 className="text-3xl font-light tracking-wide">Bộ sưu tập</h2>
           </div>
           <Link to="/shop" className="text-sm font-medium underline">
             Xem tất cả
@@ -128,7 +128,7 @@ export function Home() {
             <Link
               key={tile.title}
               to={tile.href}
-              className="group relative aspect-[4/5] overflow-hidden bg-neutral-100"
+              className="group relative aspect-[4/5] overflow-hidden bg-neutral-100 dark:bg-neutral-800"
             >
               <img
                 src={tile.image}
@@ -139,7 +139,7 @@ export function Home() {
               <div className="absolute bottom-5 left-5 text-white">
                 <h3 className="text-2xl font-light">{tile.title}</h3>
                 <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
-                  Explore <ArrowRight className="h-3.5 w-3.5" />
+                  Khám phá <ArrowRight className="h-3.5 w-3.5" />
                 </div>
               </div>
             </Link>
@@ -148,23 +148,23 @@ export function Home() {
       </section>
 
       <ProductSection
-        title="New arrivals"
-        eyebrow="Fresh from DB"
+        title="Sản phẩm mới"
+        eyebrow="Mới cập nhật"
         href="/shop?new=true"
         products={newArrivals.length ? newArrivals : fallbackRow}
       />
 
       <ProductSection
-        title="Best sellers"
-        eyebrow="Most wanted"
+        title="Bán chạy"
+        eyebrow="Được quan tâm"
         href="/shop"
         products={bestSellers.length ? bestSellers : fallbackRow}
         muted
       />
 
       <ProductSection
-        title="Made for you"
-        eyebrow="AI picks"
+        title="Dành cho bạn"
+        eyebrow="Gợi ý AI"
         href="/danh-cho-ban"
         products={aiRecommendations}
         emptyText="Chưa có gợi ý AI từ DB."
@@ -189,27 +189,27 @@ function ProductSection({
   emptyText?: string;
 }) {
   return (
-    <section className={muted ? "bg-neutral-50 py-14" : "py-14"}>
+    <section className={muted ? "bg-neutral-50 py-14 dark:bg-neutral-900" : "bg-white py-14 dark:bg-neutral-950"}>
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
-            <div className="mb-2 text-xs uppercase tracking-[0.22em] text-neutral-500">
+            <div className="mb-2 text-xs uppercase tracking-[0.22em] text-neutral-500 dark:text-neutral-400">
               {eyebrow}
             </div>
             <h2 className="text-3xl font-light tracking-wide">{title}</h2>
           </div>
           <Link to={href} className="text-sm font-medium underline">
-            View all
+            Xem tất cả
           </Link>
         </div>
         {products.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
             {products.map((product) => (
-              <ProductCard key={product.id} product={product} isRecommendation={eyebrow === "AI picks"} />
+              <ProductCard key={product.id} product={product} isRecommendation={eyebrow === "Gợi ý AI"} />
             ))}
           </div>
         ) : (
-          <p className="text-sm text-neutral-500">{emptyText}</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">{emptyText}</p>
         )}
       </div>
     </section>

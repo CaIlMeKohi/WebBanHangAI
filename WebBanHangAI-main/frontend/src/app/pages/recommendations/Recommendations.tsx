@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { Link } from "react-router";
 import { Heart, RefreshCw, Search, ShoppingBag, Sparkles } from "lucide-react";
 
 import { ProductCard } from "../../components/catalog/ProductCard";
@@ -13,6 +14,10 @@ export function Recommendations() {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const observedProductTypes = useMemo(
+    () => getObservedProductTypes(products),
+    [products],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -82,10 +87,28 @@ export function Recommendations() {
             Đang cập nhật gợi ý...
           </div>
         ) : products.length ? (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} isRecommendation />
-            ))}
+          <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
+            <aside className="border bg-neutral-50 p-4">
+              <p className="text-sm font-medium leading-6 text-neutral-900">
+                Các sản phẩm bạn đã xem gần đây liên quan đến:
+              </p>
+              <div className="mt-4 space-y-2">
+                {observedProductTypes.map((type) => (
+                  <Link
+                    key={type.slug}
+                    to={`/shop?category=${encodeURIComponent(type.slug)}`}
+                    className="block rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 transition-colors hover:border-neutral-900 hover:text-neutral-950"
+                  >
+                    {type.label}
+                  </Link>
+                ))}
+              </div>
+            </aside>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {products.map((product) => (
+                <ProductCard key={product.id} product={product} isRecommendation />
+              ))}
+            </div>
           </div>
         ) : (
           <div className="border py-16 text-center">
@@ -98,6 +121,31 @@ export function Recommendations() {
       </section>
     </main>
   );
+}
+
+function getObservedProductTypes(products: Product[]) {
+  const counts = new Map<string, { label: string; slug: string; count: number }>();
+
+  for (const product of products) {
+    const label =
+      product.subcategoryName ||
+      product.categoryName ||
+      product.category ||
+      "";
+    const slug = product.subcategory || product.category || "";
+    const normalized = label.trim();
+    if (!normalized || !slug) continue;
+    const current = counts.get(slug);
+    counts.set(slug, {
+      label: current?.label ?? normalized,
+      slug,
+      count: (current?.count ?? 0) + 1,
+    });
+  }
+
+  return [...counts.values()]
+    .sort((first, second) => second.count - first.count || first.label.localeCompare(second.label, "vi"))
+    .slice(0, 4)
 }
 
 function Signal({ icon, text }: { icon: ReactNode; text: string }) {

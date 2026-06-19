@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, AlertCircle } from "lucide-react";
-import { createAdminProduct, updateAdminProduct } from "../../lib/api";
+import { createAdminProduct, fetchBrands, fetchCategories, updateAdminProduct, type BrandOption } from "../../lib/api";
 import type { AdminProduct } from "../../types/admin";
+import type { CategoryNode } from "../../data/products";
 import {
-  ADMIN_PRODUCT_BRANDS,
-  ADMIN_PRODUCT_CATEGORIES,
   appendAdminProductFormData,
   createAdminProductFormState,
   type AdminProductFormState,
@@ -28,6 +27,8 @@ export function ProductAdminForm({
   const [formData, setFormData] = useState<AdminProductFormState>(
     createAdminProductFormState(product),
   );
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [brands, setBrands] = useState<BrandOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +36,50 @@ export function ProductAdminForm({
     setImagePreview(product?.image || "");
     setImageFile(null);
   }, [product]);
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([fetchCategories(), fetchBrands()])
+      .then(([categoryItems, brandItems]) => {
+        if (!isMounted) return;
+        setCategories(
+          categoryItems
+            .flatMap((item) => (item.children?.length ? item.children : [item]))
+            .filter((item) => typeof item.id === "number"),
+        );
+        setBrands(brandItems);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setCategories([]);
+          setBrands([]);
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!categories.length) return;
+    const hasSelectedCategory = categories.some(
+      (category) => category.id === formData.category_id,
+    );
+    if (!hasSelectedCategory && typeof categories[0].id === "number") {
+      setFormData((current) => ({
+        ...current,
+        category_id: categories[0].id as number,
+      }));
+    }
+  }, [categories, formData.category_id]);
+
+  useEffect(() => {
+    if (!brands.length || formData.brand_id) return;
+    const firstBrandId = brands[0].brand_id ?? brands[0].id;
+    if (typeof firstBrandId === "number") {
+      setFormData((current) => ({ ...current, brand_id: firstBrandId }));
+    }
+  }, [brands, formData.brand_id]);
 
   useEffect(() => {
     return () => {
@@ -48,9 +93,15 @@ export function ProductAdminForm({
     >,
   ) => {
     const { name, value } = e.target;
+    const type = e.target instanceof HTMLInputElement ? e.target.type : "";
+    const checked =
+      e.target instanceof HTMLInputElement ? e.target.checked : false;
     setFormData((prev) => ({
       ...prev,
       [name]:
+        type === "checkbox"
+          ? checked
+          :
         name === "price" ||
         name === "sale_price" ||
         name === "stock_quantity" ||
@@ -89,7 +140,7 @@ export function ProductAdminForm({
 
     try {
       const payload = new FormData();
-      appendAdminProductFormData(payload, formData, imageFile);
+      appendAdminProductFormData(payload, formData, imageFile, isCreating);
 
       if (product) {
         await updateAdminProduct(product.id, payload);
@@ -223,11 +274,27 @@ export function ProductAdminForm({
                 required
                 className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
               >
-                {ADMIN_PRODUCT_CATEGORIES.map((cat) => (
+                {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>
                     {cat.name}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Gioi tinh *
+              </label>
+              <select
+                name="gender"
+                value={formData.gender}
+                onChange={handleChange}
+                required
+                className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              >
+                <option value="unisex">Unisex</option>
+                <option value="men">Do nam</option>
+                <option value="women">Do nu</option>
               </select>
             </div>
             <div>
@@ -241,8 +308,8 @@ export function ProductAdminForm({
                 className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
               >
                 <option value="">Chọn thương hiệu</option>
-                {ADMIN_PRODUCT_BRANDS.map((brand) => (
-                  <option key={brand.id} value={brand.id}>
+                {brands.map((brand) => (
+                  <option key={brand.brand_id ?? brand.id} value={brand.brand_id ?? brand.id}>
                     {brand.name}
                   </option>
                 ))}
@@ -261,6 +328,25 @@ export function ProductAdminForm({
               onChange={handleChange}
               className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
             />
+          </div>
+
+          <div className="rounded-lg border border-neutral-200 p-4">
+            <label className="flex items-center gap-3 text-sm font-medium">
+              <input
+                type="checkbox"
+                name="is_new"
+                checked={isCreating ? true : formData.is_new}
+                onChange={handleChange}
+                disabled={isCreating}
+                className="h-4 w-4 rounded border-neutral-300"
+              />
+              Sản phẩm mới
+            </label>
+            {isCreating && (
+              <p className="mt-2 text-xs text-neutral-500">
+                Sản phẩm mới tạo sẽ tự động được đánh dấu là sản phẩm mới.
+              </p>
+            )}
           </div>
 
           <div>

@@ -18,16 +18,16 @@ export function PaymentQr() {
         </div>
 
         <div className="rounded-md border bg-neutral-50 p-4 text-center">
-          <img src={qrUrl} alt="Ma QR thanh toan" className="mx-auto h-64 w-64" />
+          <img src={qrUrl} alt="Mã QR thanh toán" className="mx-auto h-64 w-64" />
         </div>
 
         <div className="mt-5 space-y-2 text-sm text-neutral-700">
           <div className="flex justify-between gap-3">
-            <span>Ma don</span>
+            <span>Mã đơn</span>
             <strong>#{orderId}</strong>
           </div>
           <div className="flex justify-between gap-3">
-            <span>So tien</span>
+            <span>Số tiền</span>
             <strong>{amount.toLocaleString("vi-VN")} VND</strong>
           </div>
         </div>
@@ -36,7 +36,7 @@ export function PaymentQr() {
           href={gatewayUrl}
           className="mt-6 block w-full rounded-md bg-neutral-950 px-4 py-3 text-center font-medium text-white"
         >
-          Mo trang thanh toan
+          Mở trang thanh toán
         </a>
 
         <Link to={returnTo} className="mt-4 inline-flex items-center gap-2 text-sm text-neutral-600 hover:text-neutral-950">

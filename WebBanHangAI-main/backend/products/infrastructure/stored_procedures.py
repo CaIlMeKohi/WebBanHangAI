@@ -27,6 +27,10 @@ def report_revenue_by_payment_method(from_date=None, to_date=None) -> list[dict]
     return call_sp('sp_ReportRevenueByPaymentMethod', [from_date, to_date])
 
 
+def report_order_status(from_date=None, to_date=None) -> list[dict]:
+    return call_sp('sp_ReportOrderStatus', [from_date, to_date])
+
+
 def report_best_products(from_date=None, to_date=None, top=20) -> list[dict]:
     return call_sp('sp_ReportBestSellingProducts', [from_date, to_date, top])
 
@@ -37,6 +41,35 @@ def report_best_brands(from_date=None, to_date=None, top=20) -> list[dict]:
 
 def low_stock_variants() -> list[dict]:
     return call_sp('sp_GetLowStockVariants')
+
+
+def update_order_status(
+    order_id: int,
+    next_status: str,
+    actor_user_id: int | None = None,
+    carrier_name: str | None = None,
+) -> dict | None:
+    rows = call_sp('sp_UpdateOrderStatus', [order_id, next_status, actor_user_id, carrier_name])
+    return rows[0] if rows else None
+
+
+def cancel_order_and_restore_stock(
+    order_id: int,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+) -> dict | None:
+    rows = call_sp('sp_CancelOrderAndRestoreStock', [order_id, actor_user_id, reason])
+    return rows[0] if rows else None
+
+
+def refund_order(
+    order_id: int,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+    restore_stock: bool = False,
+) -> dict | None:
+    rows = call_sp('sp_RefundOrder', [order_id, actor_user_id, reason, 1 if restore_stock else 0])
+    return rows[0] if rows else None
 
 
 def hard_delete_product(product_id: int) -> dict:

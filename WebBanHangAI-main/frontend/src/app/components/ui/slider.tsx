@@ -16,6 +16,10 @@ export function Slider({
   className = "",
 }: SliderProps) {
   const [start, end] = value;
+  const progressStyle = (currentValue: number) =>
+    ({
+      "--slider-progress": `${((currentValue - min) / (max - min)) * 100}%`,
+    }) as CSSProperties;
 
   function updateStart(nextValue: number) {
     onValueChange([Math.min(nextValue, end), end]);
@@ -33,8 +37,10 @@ export function Slider({
         max={max}
         step={step}
         value={start}
+        aria-label="Giá tối thiểu"
+        style={progressStyle(start)}
         onChange={(event) => updateStart(Number(event.target.value))}
-        className="w-full accent-neutral-900"
+        className="price-range-slider w-full"
       />
       <input
         type="range"
@@ -42,9 +48,12 @@ export function Slider({
         max={max}
         step={step}
         value={end}
+        aria-label="Giá tối đa"
+        style={progressStyle(end)}
         onChange={(event) => updateEnd(Number(event.target.value))}
-        className="w-full accent-neutral-900"
+        className="price-range-slider w-full"
       />
     </div>
   );
 }
+import type { CSSProperties } from "react";

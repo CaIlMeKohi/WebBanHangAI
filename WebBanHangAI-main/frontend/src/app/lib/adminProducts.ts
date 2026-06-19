@@ -8,8 +8,11 @@ export interface AdminProductFormState {
   sale_price: number | null;
   stock_quantity: number;
   category_id: number;
+  gender: "men" | "women" | "unisex";
   brand_id: number | null;
   feature_text: string;
+  is_new: boolean;
+  is_bestseller: boolean;
 }
 
 export const ADMIN_PRODUCT_CATEGORIES = [
@@ -38,8 +41,11 @@ export function createAdminProductFormState(
     sale_price: product?.sale_price ?? null,
     stock_quantity: product?.stock_quantity || 0,
     category_id: product?.category_id ?? 1,
+    gender: product?.gender ?? "unisex",
     brand_id: product?.brand_id ?? 1,
     feature_text: product?.feature_text || "",
+    is_new: product?.is_new ?? product?.isNew ?? !product,
+    is_bestseller: product?.is_bestseller ?? product?.isBestSeller ?? false,
   };
 }
 
@@ -47,6 +53,7 @@ export function appendAdminProductFormData(
   payload: FormData,
   formData: AdminProductFormState,
   imageFile: File | null,
+  isCreating = false,
 ) {
   payload.append("name", formData.name);
   payload.append("slug", formData.slug);
@@ -59,12 +66,15 @@ export function appendAdminProductFormData(
 
   payload.append("stock_quantity", String(formData.stock_quantity));
   payload.append("category_id", String(formData.category_id));
+  payload.append("gender", formData.gender);
 
   if (formData.brand_id !== null && formData.brand_id !== undefined) {
     payload.append("brand_id", String(formData.brand_id));
   }
 
   payload.append("feature_text", formData.feature_text);
+  payload.append("is_new", String(isCreating ? true : formData.is_new));
+  payload.append("is_bestseller", String(formData.is_bestseller));
 
   if (imageFile) {
     payload.append("image_file", imageFile);

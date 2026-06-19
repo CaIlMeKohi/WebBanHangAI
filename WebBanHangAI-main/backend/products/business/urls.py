@@ -2,6 +2,8 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from products.business.views import (
+    AdminReviewDeleteAPIView,
+    AdminAuditLogAPIView,
     AdminStaffCreateAPIView,
     AdminLowStockAPIView,
     AdminLowStockThresholdAPIView,
@@ -14,6 +16,7 @@ from products.business.views import (
     AdminUserViewSet,
     ChangePasswordAPIView,
     CustomerOrderDetailAPIView,
+    OrderConfirmReceivedAPIView,
     ForgotPasswordAPIView,
     LogoutAPIView,
     MeAPIView,
@@ -44,7 +47,8 @@ from products.business.views import (
     StaffReviewListAPIView,
     VerifyEmailAPIView,
 )
-from products.views import AuthLoginAPIView, AuthRegisterAPIView, InventoryAdjustAPIView, LowStockAPIView
+from products.interfaces.api.auth_security_views import ResendRegistrationOTPAPIView, VerifyPasswordResetOTPAPIView, VerifyRegistrationOTPAPIView
+from products.views import AuthLoginAPIView, AuthRegisterAPIView, InventoryAdjustAPIView, LowStockAPIView, StockVariantListAPIView
 
 
 admin_router = DefaultRouter()
@@ -55,11 +59,14 @@ admin_router.register('recommendation-configs', RecommendationConfigViewSet, bas
 
 auth_patterns = [
     path('register', AuthRegisterAPIView.as_view()),
+    path('register/verify-otp', VerifyRegistrationOTPAPIView.as_view()),
+    path('register/resend-otp', ResendRegistrationOTPAPIView.as_view()),
     path('login', AuthLoginAPIView.as_view()),
     path('logout', LogoutAPIView.as_view()),
     path('verify-email', VerifyEmailAPIView.as_view()),
     path('resend-verification', ResendVerificationAPIView.as_view()),
     path('forgot-password', ForgotPasswordAPIView.as_view()),
+    path('forgot-password/verify-otp', VerifyPasswordResetOTPAPIView.as_view()),
     path('reset-password', ResetPasswordAPIView.as_view()),
     path('change-password', ChangePasswordAPIView.as_view()),
     path('me', MeAPIView.as_view()),
@@ -67,6 +74,7 @@ auth_patterns = [
 
 customer_patterns = [
     path('orders/<int:order_id>', CustomerOrderDetailAPIView.as_view()),
+    path('orders/<int:order_id>/confirm-received', OrderConfirmReceivedAPIView.as_view()),
 ]
 
 return_patterns = [
@@ -98,11 +106,13 @@ staff_patterns = [
     path('returns/<int:return_id>/status', StaffReturnStatusAPIView.as_view()),
     path('inventory/import', InventoryAdjustAPIView.as_view()),
     path('inventory/adjust', InventoryAdjustAPIView.as_view()),
+    path('inventory/variants', StockVariantListAPIView.as_view()),
     path('inventory/low-stock', LowStockAPIView.as_view()),
 ]
 
 admin_patterns = [
     path('staffs', AdminStaffCreateAPIView.as_view()),
+    path('audit-logs', AdminAuditLogAPIView.as_view()),
     path('users/<int:user_id>/lock', AdminUserLockAPIView.as_view()),
     path('users/<int:user_id>/unlock', AdminUserUnlockAPIView.as_view()),
     path('users/<int:user_id>', AdminUserUpdateDeleteAPIView.as_view()),
@@ -117,10 +127,12 @@ admin_patterns = [
     path('reports/order-status', ReportsOrderStatusAPIView.as_view()),
     path('reports/recommendations', RecommendationMetricsAPIView.as_view()),
     path('recommendations/run', RunRecommendationAPIView.as_view()),
+    path('reviews/<int:review_id>', AdminReviewDeleteAPIView.as_view()),
 ]
 
 notification_patterns = [
     path('', NotificationListAPIView.as_view()),
+    path('<int:notification_id>', NotificationReadAPIView.as_view()),
     path('<int:notification_id>/read', NotificationReadAPIView.as_view()),
 ]
 

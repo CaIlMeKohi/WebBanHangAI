@@ -1,5 +1,14 @@
 import { Link, Outlet, useNavigate } from "react-router";
-import { LogOut, Package, Settings, Users } from "lucide-react";
+import {
+  BarChart3,
+  Home,
+  LogOut,
+  Package,
+  ReceiptText,
+  Settings,
+  TicketPercent,
+  Users,
+} from "lucide-react";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import { ProtectedRoute } from "../ProtectedRoute";
 
@@ -26,11 +35,27 @@ export function AdminLayout() {
 
           <nav className="space-y-2 px-4">
             <Link
+              to="/portal-admin"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-800 transition-colors"
+            >
+              <BarChart3 className="w-5 h-5" />
+              <span>Dashboard</span>
+            </Link>
+
+            <Link
+              to="/"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-800 transition-colors"
+            >
+              <Home className="w-5 h-5" />
+              <span>Trang chủ</span>
+            </Link>
+
+            <Link
               to="/portal-admin/products"
               className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-800 transition-colors"
             >
               <Package className="w-5 h-5" />
-              <span>Products</span>
+              <span>Sản phẩm</span>
             </Link>
 
             <Link
@@ -39,6 +64,22 @@ export function AdminLayout() {
             >
               <Users className="w-5 h-5" />
               <span>Tài khoản</span>
+            </Link>
+
+            <Link
+              to="/portal-admin/orders"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-800 transition-colors"
+            >
+              <ReceiptText className="w-5 h-5" />
+              <span>Đơn hàng</span>
+            </Link>
+
+            <Link
+              to="/portal-admin/coupons"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-800 transition-colors"
+            >
+              <TicketPercent className="w-5 h-5" />
+              <span>Coupon</span>
             </Link>
 
             <Link

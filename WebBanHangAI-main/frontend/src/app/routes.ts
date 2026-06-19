@@ -3,7 +3,6 @@ import { Root } from "./pages/Root";
 import { Home } from "./pages/home/Home";
 import { ProductListing } from "./pages/catalog/ProductListing";
 import { ProductDetail } from "./pages/catalog/ProductDetail";
-import { Cart } from "./pages/cart/Cart";
 import { Profile } from "./pages/profile/Profile";
 import { Recommendations } from "./pages/recommendations/Recommendations";
 import { NotFound } from "./pages/NotFound";
@@ -12,13 +11,19 @@ import { AdminLogin } from "./pages/auth/AdminLogin";
 import { AdminProductsRoute } from "./pages/admin/AdminProductsRoute";
 import { RedirectToLogin } from "./pages/auth/RedirectToLogin";
 import { RedirectToWishlist } from "./pages/auth/RedirectToWishlist";
+import { RedirectToCart } from "./pages/auth/RedirectToCart";
 import { Register } from "./pages/auth/Register";
+import { ForgotPassword } from "./pages/auth/ForgotPassword";
 import { StaffPortal } from "./pages/staff/StaffPortal";
 import { AdminOperations } from "./pages/admin/AdminOperations";
 import { AdminAccounts } from "./pages/admin/AdminAccounts";
+import { AdminCoupons } from "./pages/admin/AdminCoupons";
+import { AdminDashboard } from "./pages/admin/AdminDashboard";
+import { AdminOrders } from "./pages/admin/AdminOrders";
 import { PaymentQr } from "./pages/payment/PaymentQr";
 import { MockPaymentGateway } from "./pages/payment/MockPaymentGateway";
 import { RouteError } from "./pages/RouteError";
+import { ComingSoon } from "./pages/ComingSoon";
 
 export const router = createBrowserRouter([
   {
@@ -40,7 +45,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "cart",
-        Component: Cart,
+        Component: RedirectToCart,
       },
       {
         path: "profile",
@@ -51,18 +56,23 @@ export const router = createBrowserRouter([
         Component: Recommendations,
       },
       {
-        path: "staff",
-        Component: StaffPortal,
-      },
-      {
         path: "payment/qr",
         Component: PaymentQr,
+      },
+      {
+        path: "dang-hoan-thien",
+        Component: ComingSoon,
       },
       {
         path: "*",
         Component: NotFound,
       },
     ],
+  },
+  {
+    path: "/staff",
+    Component: StaffPortal,
+    ErrorBoundary: RouteError,
   },
   {
     path: "/portal-admin/login",
@@ -75,6 +85,10 @@ export const router = createBrowserRouter([
   {
     path: "/register",
     Component: Register,
+  },
+  {
+    path: "/forgot-password",
+    Component: ForgotPassword,
   },
   {
     path: "/wishlist",
@@ -90,6 +104,10 @@ export const router = createBrowserRouter([
     ErrorBoundary: RouteError,
     children: [
       {
+        index: true,
+        Component: AdminDashboard,
+      },
+      {
         path: "products",
         Component: AdminProductsRoute,
       },
@@ -100,6 +118,14 @@ export const router = createBrowserRouter([
       {
         path: "accounts",
         Component: AdminAccounts,
+      },
+      {
+        path: "orders",
+        Component: AdminOrders,
+      },
+      {
+        path: "coupons",
+        Component: AdminCoupons,
       },
     ],
   },

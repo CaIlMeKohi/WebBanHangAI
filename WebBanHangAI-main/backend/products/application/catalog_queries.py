@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.db.models import Q, QuerySet
 
-from products.models import Product
+from products.models import Category, Product
 
 
 def active_products_queryset() -> QuerySet[Product]:
@@ -15,6 +15,7 @@ def active_products_queryset() -> QuerySet[Product]:
 
 def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Product]:
     category = params.get('category')
+    gender = params.get('gender')
     search = params.get('search')
     subcategories = params.getlist('subcategory')
     brand = params.get('brand')
@@ -27,11 +28,18 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
     max_price = params.get('maxPrice')
     sort = params.get('sort')
 
+    if category in {'men', 'women'} and not gender:
+        gender = category
+        category = None
+
+    if gender in {'men', 'women', 'unisex'}:
+        gender_filter = Q(gender=gender)
+        if gender in {'men', 'women'} and params.get('include_unisex', 'true') in {'true', '1'}:
+            gender_filter |= Q(gender='unisex')
+        queryset = queryset.filter(gender_filter)
     if category:
-        category_filter = Q(category__slug=category) | Q(category__parent__slug=category)
-        if category in {'men', 'women'} and params.get('include_unisex', 'true') in {'true', '1'}:
-            category_filter |= Q(category__slug='unisex') | Q(category__parent__slug='unisex')
-        queryset = queryset.filter(category_filter)
+        category_slugs = _category_slug_with_descendants(category)
+        queryset = queryset.filter(category__slug__in=category_slugs or [category])
     if params.get('new') in {'true', '1'}:
         queryset = queryset.filter(is_new=True)
     if params.get('sale') in {'true', '1'}:
@@ -46,7 +54,10 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
     if subcategories:
         queryset = queryset.filter(category__slug__in=subcategories)
     if brand:
-        queryset = queryset.filter(Q(brand__slug=brand) | Q(brand_id=brand))
+        brand_filter = Q(brand__slug=brand)
+        if str(brand).isdigit():
+            brand_filter |= Q(brand_id=int(brand))
+        queryset = queryset.filter(brand_filter)
     if size:
         queryset = queryset.filter(variants__size=size, variants__is_active=True)
     if color:
@@ -72,3 +83,22 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
         queryset = queryset.order_by('-is_bestseller', '-is_new', '-created_at', '-product_id')
 
     return queryset.distinct()
+
+
+def _category_slug_with_descendants(slug: str) -> list[str]:
+    categories = list(Category.objects.filter(is_active=True).values('category_id', 'parent_id', 'slug'))
+    children_by_parent: dict[int | None, list[dict]] = {}
+    for item in categories:
+        children_by_parent.setdefault(item['parent_id'], []).append(item)
+
+    start = next((item for item in categories if item['slug'] == slug), None)
+    if not start:
+        return []
+
+    result: list[str] = []
+    stack = [start]
+    while stack:
+        current = stack.pop()
+        result.append(current['slug'])
+        stack.extend(children_by_parent.get(current['category_id'], []))
+    return result

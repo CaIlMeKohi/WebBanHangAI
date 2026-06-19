@@ -1,58 +1,64 @@
 # WebBanHangAI
 
-Project ecommerce 1 shop, 1 database server, 1 backend, 1 frontend.
+Website bán hàng thời trang gồm giao diện khách hàng, cổng nhân viên, trang quản trị và hệ thống gợi ý sản phẩm.
 
-## Mô hình chạy
+## Công nghệ
 
-- Docker: chạy SQL Server
-- SSMS: quản lý database
-- Backend: Django kết nối vào SQL Server
-- Frontend: Vite React gọi API từ backend
+- Backend: Django, Django REST Framework
+- Frontend: React, TypeScript, Vite, Tailwind CSS
+- Database: SQL Server
+- Lưu trữ ảnh: Cloudinary
+- Email OTP: Gmail SMTP
 
-## Cấu hình môi trường
+## Yêu cầu
 
-Copy [`.env.example`](.env.example) thành [`.env`](.env) ở thư mục gốc và chỉnh các giá trị cần thiết.
+- Python 3.12+
+- Node.js 20+
+- SQL Server và ODBC Driver 17 hoặc 18
+- Tài khoản Cloudinary nếu cần tải ảnh
+- Gmail App Password nếu cần gửi OTP
 
-Các thông số quan trọng:
+## Cấu hình
 
-- `DATABASE_ENGINE=mssql`
-- `SQLSERVER_HOST=127.0.0.1`
-- `SQLSERVER_PORT=1433`
-- `SQLSERVER_DATABASE=FashionShopDB`
-- `SQLSERVER_USER=sa`
-- `SQLSERVER_PASSWORD=...`
-
-## Chạy project
+Tạo file `.env` từ `.env.example` rồi cập nhật thông tin SQL Server, Cloudinary và Gmail SMTP.
 
 ```powershell
-cd D:\Hoc\ThucTapCoSo\DuAn\WebBanHangAI-main
+Copy-Item .env.example .env
+```
+
+Không đưa file `.env` hoặc mật khẩu thật lên Git.
+
+## Cài đặt
+
+```powershell
+python -m venv backend\venv
+backend\venv\Scripts\pip.exe install -r backend\requirements.txt
+cd frontend
+npm install
+cd ..
+```
+
+## Khởi chạy
+
+Chạy project với hot reload:
+
+```powershell
+.\START_DEV_HOT_RELOAD.bat
+```
+
+Hoặc chạy bản build ổn định:
+
+```powershell
 .\START_PROJECT.bat
 ```
 
-Sau khi chạy xong, mở:
+Truy cập website tại `http://127.0.0.1:8000`.
 
-- `http://localhost:8000`
+## Kiểm tra
 
-`START_PROJECT.bat` sẽ tự chạy Docker, build frontend nếu chưa có `frontend/dist`, rồi chạy cả UI và API trên cùng một localhost.
-
-## Kết nối SSMS
-
-- Server name: `localhost,1433`
-- Authentication: `SQL Server Authentication`
-- Login: `sa`
-- Password: giá trị trong `.env`
-
-## Chế độ local đã xác minh
-
-Trong môi trường này, kết nối đọc dữ liệu và migration đã được xác minh với SQL Server Express local bằng Windows Authentication:
-
-- `SQLSERVER_TRUSTED_CONNECTION=True`
-- `SQLSERVER_HOST=DESKTOP-T0ITRD8\SQLEXPRESS`
-- `SQLSERVER_DATABASE=FashionShopDB`
-
-Nếu bạn dùng Docker SQL Server, giữ cấu hình SQL auth trong `.env`; nếu muốn đi theo đường chắc chắn trên máy Windows này, chuyển sang trusted connection như trên.
-
-## Tài liệu hỗ trợ
-
-- [SQL Server + Docker + SSMS](SQLSERVER_DOCKER_SSMS.md)
-- [Upgrade guide](UPGRADE_GUIDE_v1_to_v2.1.md)
+```powershell
+backend\venv\Scripts\python.exe backend\manage.py check
+backend\venv\Scripts\python.exe backend\manage.py test
+cd frontend
+npm run build
+```
