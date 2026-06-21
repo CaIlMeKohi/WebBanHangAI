@@ -56,6 +56,7 @@ class DjangoOrmOrderRepository:
                 'shipped',
                 'delivered',
                 'completed',
+                'cancelled',
             ])
             .prefetch_related('items', 'items__product')
             .order_by('-created_at')
@@ -228,38 +229,14 @@ class DjangoOrmOrderRepository:
         try:
             if payload.status == 'cancelled':
                 cancel_order_and_restore_stock(order.order_id, actor.user_id if actor else None, payload.note or 'Staff cancelled order')
-            elif payload.status in {'confirmed', 'processing'}:
-                update_order_status(order.order_id, payload.status, actor.user_id, payload.carrier_name)
             else:
-                old_status = order.status
-                order.status = payload.status
-                order.updated_at = timezone.now()
-                order.save(update_fields=['status', 'updated_at'])
-                if payload.status == 'waiting_pickup':
-                    staff_profile = StaffProfile.objects.filter(user=actor).first()
-                    Shipment.objects.update_or_create(
-                        order=order,
-                        defaults={
-                            'carrier_name': payload.carrier_name,
-                            'tracking_code': payload.tracking_code or f'BKQ{timezone.now().strftime("%y%m%d")}{order.order_id}',
-                            'shipment_status': 'waiting_pickup',
-                            'created_by_staff': staff_profile,
-                            'updated_at': timezone.now(),
-                        },
-                    )
-                elif payload.status in {'shipped', 'delivered', 'completed'}:
-                    Shipment.objects.filter(order=order).update(
-                        shipment_status=payload.status,
-                        shipped_at=timezone.now() if payload.status == 'shipped' else models.F('shipped_at'),
-                        delivered_at=timezone.now() if payload.status in {'delivered', 'completed'} else models.F('delivered_at'),
-                        updated_at=timezone.now(),
-                    )
-                OrderStatusHistory.objects.create(
-                    order=order,
-                    from_status=old_status,
-                    to_status=payload.status,
-                    note=payload.note or f'Status changed to {payload.status}',
-                    changed_by=actor,
+                update_order_status(
+                    order.order_id,
+                    payload.status,
+                    actor.user_id if actor else None,
+                    payload.carrier_name or None,
+                    payload.tracking_code or None,
+                    payload.note or None,
                 )
         except DatabaseError as exc:
             raise BusinessRuleViolation('Khong the cap nhat trang thai don hang') from exc

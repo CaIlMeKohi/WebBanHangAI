@@ -5,14 +5,14 @@ export interface AdminProductFormState {
   slug: string;
   description: string;
   price: number;
-  sale_price: number | null;
   stock_quantity: number;
-  category_id: number;
+  category_id: number | null;
   gender: "men" | "women" | "unisex";
   brand_id: number | null;
   feature_text: string;
   is_new: boolean;
   is_bestseller: boolean;
+  variants: Array<{ size: string; stock_quantity: number }>;
 }
 
 export const ADMIN_PRODUCT_CATEGORIES = [
@@ -30,6 +30,16 @@ export const ADMIN_PRODUCT_BRANDS = [
   { id: 2, name: "Essence Studio" },
 ] as const;
 
+export function formatMoneyInput(value: number | string | null | undefined) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits ? Number(digits).toLocaleString("vi-VN") : "";
+}
+
+export function parseMoneyInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+}
+
 export function createAdminProductFormState(
   product?: AdminProduct | null,
 ): AdminProductFormState {
@@ -38,14 +48,18 @@ export function createAdminProductFormState(
     slug: product?.slug || "",
     description: product?.description || "",
     price: product?.base_price ?? product?.originalPrice ?? product?.price ?? 0,
-    sale_price: product?.sale_price ?? null,
     stock_quantity: product?.stock_quantity || 0,
-    category_id: product?.category_id ?? 1,
+    category_id: product?.category_id ?? null,
     gender: product?.gender ?? "unisex",
-    brand_id: product?.brand_id ?? 1,
+    brand_id: product?.brand_id ?? null,
     feature_text: product?.feature_text || "",
     is_new: product?.is_new ?? product?.isNew ?? !product,
     is_bestseller: product?.is_bestseller ?? product?.isBestSeller ?? false,
+    variants:
+      product?.variants?.filter((variant) => variant.is_active !== false).map((variant) => ({
+        size: variant.size,
+        stock_quantity: variant.stock_quantity,
+      })) ?? [{ size: "STD", stock_quantity: product?.stock_quantity || 0 }],
   };
 }
 
@@ -60,12 +74,12 @@ export function appendAdminProductFormData(
   payload.append("description", formData.description);
   payload.append("base_price", String(formData.price));
 
-  if (formData.sale_price !== null && formData.sale_price !== undefined) {
-    payload.append("sale_price", String(formData.sale_price));
+  const totalStock = formData.variants.reduce((sum, variant) => sum + Number(variant.stock_quantity || 0), 0);
+  payload.append("stock_quantity", String(totalStock));
+  payload.append("variants", JSON.stringify(formData.variants));
+  if (formData.category_id !== null) {
+    payload.append("category_id", String(formData.category_id));
   }
-
-  payload.append("stock_quantity", String(formData.stock_quantity));
-  payload.append("category_id", String(formData.category_id));
   payload.append("gender", formData.gender);
 
   if (formData.brand_id !== null && formData.brand_id !== undefined) {

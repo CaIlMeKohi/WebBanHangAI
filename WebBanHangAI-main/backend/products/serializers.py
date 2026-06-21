@@ -1,7 +1,9 @@
 from datetime import timedelta
+from decimal import Decimal, ROUND_HALF_UP
+import json
 import re
 
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -30,6 +32,7 @@ class ProductSerializer(serializers.ModelSerializer):
     id = serializers.SerializerMethodField()
     price = serializers.SerializerMethodField()
     originalPrice = serializers.SerializerMethodField()
+    discountPercent = serializers.SerializerMethodField()
     image = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     subcategory = serializers.SerializerMethodField()
@@ -53,10 +56,81 @@ class ProductSerializer(serializers.ModelSerializer):
         return str(obj.product_id)
 
     def get_price(self, obj: Product) -> int:
-        return int(obj.base_price)
+        return self._get_promotional_price(obj)[0]
 
     def get_originalPrice(self, obj: Product):
-        return None
+        return self._get_promotional_price(obj)[1]
+
+    def get_discountPercent(self, obj: Product) -> int | None:
+        return self._get_promotional_price(obj)[2]
+
+    def _get_promotional_price(self, obj: Product) -> tuple[int, int | None, int | None]:
+        cache = getattr(self, '_promotional_price_cache', None)
+        if cache is None:
+            cache = {}
+            self._promotional_price_cache = cache
+        if obj.product_id in cache:
+            return cache[obj.product_id]
+
+        base_price = Decimal(obj.base_price)
+        best_discount = Decimal('0')
+        category_ids = self._get_category_ancestor_ids(obj.category_id)
+
+        for coupon in self._get_active_scoped_coupons():
+            if coupon.product_id and coupon.product_id != obj.product_id:
+                continue
+            if coupon.category_id and coupon.category_id not in category_ids:
+                continue
+
+            if coupon.discount_type == 'percentage':
+                discount = base_price * Decimal(coupon.discount_value) / Decimal('100')
+                if coupon.max_discount is not None:
+                    discount = min(discount, Decimal(coupon.max_discount))
+            else:
+                discount = Decimal(coupon.discount_value)
+
+            best_discount = max(best_discount, min(discount, base_price))
+
+        if best_discount <= 0 or base_price <= 0:
+            result = (int(base_price), None, None)
+        else:
+            discounted_price = max(Decimal('0'), base_price - best_discount)
+            percent = int(
+                (best_discount * Decimal('100') / base_price).quantize(
+                    Decimal('1'), rounding=ROUND_HALF_UP
+                )
+            )
+            result = (int(discounted_price), int(base_price), max(1, percent))
+
+        cache[obj.product_id] = result
+        return result
+
+    def _get_active_scoped_coupons(self) -> list[Coupon]:
+        coupons = getattr(self, '_active_scoped_coupons', None)
+        if coupons is None:
+            now = timezone.now()
+            coupons = list(
+                Coupon.objects.filter(is_active=True)
+                .filter(Q(start_at__isnull=True) | Q(start_at__lte=now))
+                .filter(Q(end_at__isnull=True) | Q(end_at__gte=now))
+                .filter(Q(usage_limit__isnull=True) | Q(used_count__lt=F('usage_limit')))
+                .exclude(product__isnull=True, category__isnull=True)
+            )
+            self._active_scoped_coupons = coupons
+        return coupons
+
+    def _get_category_ancestor_ids(self, category_id: int) -> set[int]:
+        parent_map = getattr(self, '_category_parent_map', None)
+        if parent_map is None:
+            parent_map = dict(Category.objects.values_list('category_id', 'parent_id'))
+            self._category_parent_map = parent_map
+
+        category_ids: set[int] = set()
+        current_id = category_id
+        while current_id is not None and current_id not in category_ids:
+            category_ids.add(current_id)
+            current_id = parent_map.get(current_id)
+        return category_ids
 
     def get_image(self, obj: Product) -> str:
         primary = obj.images.filter(is_primary=True).first()
@@ -119,6 +193,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'name',
             'price',
             'originalPrice',
+            'discountPercent',
             'image',
             'images',
             'category',
@@ -154,15 +229,15 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     subcategory = serializers.SerializerMethodField()
     gender = serializers.ChoiceField(choices=['men', 'women', 'unisex'], required=False)
     stock_quantity = serializers.SerializerMethodField()
+    variants = serializers.SerializerMethodField()
     category_id = serializers.PrimaryKeyRelatedField(
         queryset=Category.objects.filter(is_active=True),
         source='category',
-        write_only=True
     )
     brand_id = serializers.PrimaryKeyRelatedField(
         queryset=Brand.objects.all(),
         source='brand',
-        allow_null=True,
+        allow_null=False,
         write_only=True
     )
     upload_image_url = serializers.CharField(max_length=500, write_only=True, required=False, source='image_url')
@@ -194,6 +269,7 @@ class ProductAdminSerializer(serializers.ModelSerializer):
             'is_new',
             'is_bestseller',
             'stock_quantity',
+            'variants',
             'image_url',
             'upload_image_url',
             'image_file',
@@ -225,6 +301,18 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     def get_stock_quantity(self, obj: Product) -> int:
         return sum(max(0, variant.stock_quantity - variant.stock_reserved) for variant in obj.variants.all())
 
+    def get_variants(self, obj: Product) -> list[dict]:
+        return [
+            {
+                'variant_id': variant.variant_id,
+                'size': variant.size,
+                'color': variant.color,
+                'stock_quantity': variant.stock_quantity,
+                'is_active': variant.is_active,
+            }
+            for variant in obj.variants.order_by('variant_id')
+        ]
+
     def _store_uploaded_image(self, uploaded_file) -> str:
         try:
             return upload_product_image(uploaded_file)
@@ -234,23 +322,24 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         image_url = validated_data.pop('image_url', None)
         image_file = validated_data.pop('image_file', None)
-        stock_quantity = self._input_stock_quantity(default=0)
+        variants = self._input_variants()
 
         if image_file is not None:
             image_url = self._store_uploaded_image(image_file)
 
         product = Product.objects.create(**validated_data)
-        ProductVariant.objects.create(
-            product=product,
-            sku=self._default_sku(product),
-            color='Mặc định',
-            size='STD',
-            price=product.base_price,
-            stock_quantity=stock_quantity,
-            stock_reserved=0,
-            low_stock_threshold=5,
-            is_active=True,
-        )
+        for variant_data in variants:
+            ProductVariant.objects.create(
+                product=product,
+                sku=self._variant_sku(product, variant_data['size']),
+                color='Mặc định',
+                size=variant_data['size'],
+                price=product.base_price,
+                stock_quantity=variant_data['stock_quantity'],
+                stock_reserved=0,
+                low_stock_threshold=5,
+                is_active=True,
+            )
 
         if image_url:
             ProductImage.objects.create(
@@ -264,7 +353,7 @@ class ProductAdminSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         image_url = validated_data.pop('image_url', None)
         image_file = validated_data.pop('image_file', None)
-        stock_quantity = self._input_stock_quantity(default=None)
+        variants = self._input_variants(required=False)
 
         if image_file is not None:
             image_url = self._store_uploaded_image(image_file)
@@ -273,26 +362,30 @@ class ProductAdminSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        if stock_quantity is not None:
-            variant = instance.variants.order_by('variant_id').first()
-            if variant is None:
-                ProductVariant.objects.create(
-                    product=instance,
-                    sku=self._default_sku(instance),
-                    color='Mặc định',
-                    size='STD',
-                    price=instance.base_price,
-                    stock_quantity=stock_quantity,
-                    stock_reserved=0,
-                    low_stock_threshold=5,
-                    is_active=True,
-                )
-            else:
-                variant.stock_quantity = stock_quantity
-                variant.price = instance.base_price
-                if not variant.low_stock_threshold or variant.low_stock_threshold < 5:
-                    variant.low_stock_threshold = 5
-                variant.save(update_fields=['stock_quantity', 'price', 'low_stock_threshold', 'updated_at'])
+        if variants is not None:
+            selected_sizes = {item['size'] for item in variants}
+            existing = {item.size: item for item in instance.variants.all()}
+            for variant_data in variants:
+                variant = existing.get(variant_data['size'])
+                if variant is None:
+                    ProductVariant.objects.create(
+                        product=instance,
+                        sku=self._variant_sku(instance, variant_data['size']),
+                        color='Mặc định',
+                        size=variant_data['size'],
+                        price=instance.base_price,
+                        stock_quantity=variant_data['stock_quantity'],
+                        stock_reserved=0,
+                        low_stock_threshold=5,
+                        is_active=True,
+                    )
+                else:
+                    variant.stock_quantity = variant_data['stock_quantity']
+                    variant.price = instance.base_price
+                    variant.is_active = True
+                    variant.low_stock_threshold = max(5, variant.low_stock_threshold or 0)
+                    variant.save(update_fields=['stock_quantity', 'price', 'is_active', 'low_stock_threshold', 'updated_at'])
+            instance.variants.exclude(size__in=selected_sizes).update(is_active=False)
 
         if image_url:
             instance.images.filter(is_primary=True).delete()
@@ -313,12 +406,47 @@ class ProductAdminSerializer(serializers.ModelSerializer):
         except (TypeError, ValueError):
             raise serializers.ValidationError({'stock_quantity': 'Ton kho phai la so nguyen khong am'})
 
+    def _input_variants(self, required=True):
+        raw_value = getattr(self, 'initial_data', {}).get('variants')
+        if raw_value in (None, ''):
+            if not required:
+                return None
+            stock = self._input_stock_quantity(default=0)
+            return [{'size': 'STD', 'stock_quantity': stock}]
+        try:
+            values = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+        except json.JSONDecodeError as exc:
+            raise serializers.ValidationError({'variants': 'Danh sách size không hợp lệ'}) from exc
+        if not isinstance(values, list) or not values:
+            raise serializers.ValidationError({'variants': 'Sản phẩm phải có ít nhất một size'})
+        result = []
+        seen = set()
+        for item in values:
+            size = str(item.get('size', '')).strip().upper()[:50]
+            if not size or size in seen:
+                raise serializers.ValidationError({'variants': 'Size không được trống hoặc trùng nhau'})
+            try:
+                stock_quantity = max(0, int(item.get('stock_quantity', 0)))
+            except (TypeError, ValueError) as exc:
+                raise serializers.ValidationError({'variants': f'Tồn kho size {size} không hợp lệ'}) from exc
+            seen.add(size)
+            result.append({'size': size, 'stock_quantity': stock_quantity})
+        return result
+
     def _default_sku(self, product):
         base = ''.join(ch for ch in product.slug.upper() if ch.isalnum())[:32] or f'P{product.product_id}'
         sku = f'{base}-STD'
         if not ProductVariant.objects.filter(sku=sku).exists():
             return sku
         return f'{base}-{product.product_id}-STD'
+
+    def _variant_sku(self, product, size):
+        base = ''.join(ch for ch in product.slug.upper() if ch.isalnum())[:24] or f'P{product.product_id}'
+        size_part = ''.join(ch for ch in size.upper() if ch.isalnum())[:16] or 'STD'
+        candidate = f'{base}-{size_part}'
+        if not ProductVariant.objects.filter(sku=candidate).exists():
+            return candidate
+        return f'{base}-{product.product_id}-{size_part}'
 
 
 class UserProductEventSerializer(serializers.ModelSerializer):

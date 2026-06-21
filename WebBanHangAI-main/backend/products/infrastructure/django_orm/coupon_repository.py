@@ -17,9 +17,10 @@ def _coupon_eligible_subtotal(coupon, cart_items):
             continue
         if coupon.category_id:
             category = product.category
-            category_ids = {category.category_id}
-            if category.parent_id:
-                category_ids.add(category.parent_id)
+            category_ids = set()
+            while category is not None:
+                category_ids.add(category.category_id)
+                category = category.parent
             if coupon.category_id not in category_ids:
                 continue
         price = int(item.variant.price if item.variant_id else product.base_price)

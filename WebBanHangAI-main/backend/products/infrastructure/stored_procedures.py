@@ -48,8 +48,12 @@ def update_order_status(
     next_status: str,
     actor_user_id: int | None = None,
     carrier_name: str | None = None,
+    tracking_code: str | None = None,
+    note: str | None = None,
 ) -> dict | None:
-    rows = call_sp('sp_UpdateOrderStatus', [order_id, next_status, actor_user_id, carrier_name])
+    rows = call_sp('sp_UpdateOrderStatus', [
+        order_id, next_status, actor_user_id, carrier_name, tracking_code, note,
+    ])
     return rows[0] if rows else None
 
 

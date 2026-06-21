@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Edit2, History, Lock, Trash2, Unlock } from "lucide-react";
+import { Edit2, Eye, EyeOff, History, Lock, Trash2, Unlock } from "lucide-react";
 
 import { AdminAuditHistoryModal } from "../../components/admin/AdminAuditHistoryModal";
 import { fetchAdminAuditLogs, type AdminProductHistoryItem } from "../../lib/api";
@@ -44,7 +44,15 @@ async function api<T>(path: string, options: RequestInit = {}) {
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.detail ?? `API ${response.status}`);
+    const validationMessage = Object.entries(data)
+      .filter(([key]) => key !== "detail")
+      .flatMap(([field, messages]) =>
+        (Array.isArray(messages) ? messages : [messages]).map(
+          (message) => `${field}: ${String(message)}`,
+        ),
+      )
+      .join(" ");
+    throw new Error(data.detail || validationMessage || `API ${response.status}`);
   }
   if (response.status === 204) return null as T;
   return response.json() as Promise<T>;
@@ -77,6 +85,7 @@ export function AdminAccounts() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [form, setForm] = useState<AccountForm>(emptyForm);
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
 
   const filteredUsers = useMemo(
     () => users.filter((user) => role === "all" || user.role === role),
@@ -94,6 +103,7 @@ export function AdminAccounts() {
 
   function openCreate() {
     setForm(emptyForm);
+    setShowTemporaryPassword(false);
     setSelectedUser(null);
     setFormMode("create");
     setModalError("");
@@ -114,13 +124,23 @@ export function AdminAccounts() {
 
   async function submitForm(event: FormEvent) {
     event.preventDefault();
+    if (
+      formMode === "create" &&
+      (form.password.length < 12 ||
+        !/[A-Z]/.test(form.password) ||
+        !/[a-z]/.test(form.password) ||
+        !/\d/.test(form.password) ||
+        !/[^A-Za-z0-9]/.test(form.password))
+    ) {
+      setModalError("Mật khẩu phải có ít nhất 12 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt.");
+      return;
+    }
     try {
       if (formMode === "create") {
         await api("/admin/staffs", {
           method: "POST",
           body: JSON.stringify({
             email: form.email,
-            phone: form.phone || null,
             password: form.password,
             role: form.role === "admin" ? "admin" : "staff",
             full_name: form.email,
@@ -274,10 +294,12 @@ export function AdminAccounts() {
               <span>Email</span>
               <input className="w-full rounded border px-3 py-2" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
             </label>
-            <label className="block space-y-1 text-sm">
-              <span>Số điện thoại</span>
-              <input className="w-full rounded border px-3 py-2" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
-            </label>
+            {formMode === "edit" && (
+              <label className="block space-y-1 text-sm">
+                <span>Số điện thoại</span>
+                <input className="w-full rounded border px-3 py-2" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+              </label>
+            )}
             <label className="block space-y-1 text-sm">
               <span>Role</span>
               <select className="w-full rounded border px-3 py-2" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as AccountForm["role"] })}>
@@ -299,7 +321,26 @@ export function AdminAccounts() {
             ) : (
               <label className="block space-y-1 text-sm">
                 <span>Mật khẩu tạm thời</span>
-                <input className="w-full rounded border px-3 py-2" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required minLength={12} />
+                <div className="relative">
+                  <input
+                    className="w-full rounded border px-3 py-2 pr-11"
+                    type={showTemporaryPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={(event) => setForm({ ...form, password: event.target.value })}
+                    required
+                    minLength={12}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTemporaryPassword((visible) => !visible)}
+                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-neutral-500 hover:text-neutral-950"
+                    aria-label={showTemporaryPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                    title={showTemporaryPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  >
+                    {showTemporaryPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+                <small className="block text-neutral-500">Tối thiểu 12 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt.</small>
               </label>
             )}
             <div className="flex justify-end gap-2">

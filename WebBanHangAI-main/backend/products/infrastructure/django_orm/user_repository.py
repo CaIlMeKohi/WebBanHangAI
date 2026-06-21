@@ -77,9 +77,16 @@ class DjangoOrmUserRepository:
             raise BusinessRuleViolation('Role khong hop le')
         if len(password) < 12:
             raise BusinessRuleViolation('Mat khau nhan vien/admin toi thieu 12 ky tu')
+        if not email:
+            raise BusinessRuleViolation('Email khong duoc de trong')
+        if StoreUser.objects.filter(email=email).exists():
+            raise BusinessRuleViolation('Email da ton tai trong he thong')
+        phone = str(payload.get('phone') or '').strip() or None
+        if phone and StoreUser.objects.filter(phone=phone).exists():
+            raise BusinessRuleViolation('So dien thoai da ton tai trong he thong')
         user = StoreUser.objects.create(
             email=email,
-            phone=payload.get('phone') or None,
+            phone=phone,
             password_hash=make_password(password),
             role=role,
             account_status='active',
@@ -92,6 +99,7 @@ class DjangoOrmUserRepository:
                 full_name=payload.get('full_name', email),
                 position=payload.get('position', 'staff'),
                 department=payload.get('department', 'operations'),
+                status='working',
             )
         return user
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { History } from "lucide-react";
+import { ChevronDown, History } from "lucide-react";
 import {
   createAdminCoupon,
   deleteAdminCoupon,
@@ -56,10 +56,35 @@ const emptyForm: CouponForm = {
 };
 
 function flattenCategories(categories: CategoryNode[]): Array<{ id: number; name: string }> {
-  return categories.flatMap((category) => [
-    { id: category.id, name: category.name },
-    ...(category.children ?? []).map((child) => ({ id: child.id, name: `${category.name} / ${child.name}` })),
-  ]).filter((category): category is { id: number; name: string } => typeof category.id === "number");
+  const result: Array<{ id: number; name: string }> = [];
+  function visit(items: CategoryNode[], parents: string[] = []) {
+    items.forEach((category) => {
+      const path = [...parents, category.name];
+      if (typeof category.id === "number") result.push({ id: category.id, name: path.join(" / ") });
+      if (category.children?.length) visit(category.children, path);
+    });
+  }
+  visit(categories);
+  return result;
+}
+
+function categoryIdsInScope(categories: CategoryNode[], selectedId: number): number[] {
+  function collect(category: CategoryNode): number[] {
+    return [
+      ...(typeof category.id === "number" ? [category.id] : []),
+      ...(category.children ?? []).flatMap(collect),
+    ];
+  }
+  function find(items: CategoryNode[]): CategoryNode | null {
+    for (const category of items) {
+      if (category.id === selectedId) return category;
+      const nested = find(category.children ?? []);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  const selected = find(categories);
+  return selected ? collect(selected) : [selectedId];
 }
 
 function toDateTimeLocal(value?: string | null) {
@@ -105,7 +130,7 @@ function fromCoupon(coupon: ApiCoupon): CouponForm {
     code: coupon.code,
     discount_type: coupon.discount_type,
     discount_value: formatNumberInput(coupon.discount_value),
-    min_order_amount: String(coupon.min_order_amount ?? 0),
+    min_order_amount: formatNumberInput(coupon.min_order_amount ?? 0),
     max_discount: coupon.max_discount == null ? "" : formatNumberInput(coupon.max_discount),
     category: coupon.category == null ? "" : String(coupon.category),
     product: coupon.product == null ? "" : String(coupon.product),
@@ -136,7 +161,7 @@ function toPayload(form: CouponForm) {
     name: form.name.trim(),
     discount_type: form.discount_type,
     discount_value: parseFormattedNumber(form.discount_value),
-    min_order_amount: Number(form.min_order_amount || 0),
+    min_order_amount: parseFormattedNumber(form.min_order_amount),
     max_discount: form.max_discount ? parseFormattedNumber(form.max_discount) : null,
     category: form.category ? Number(form.category) : null,
     product: form.product ? Number(form.product) : null,
@@ -151,8 +176,10 @@ function toPayload(form: CouponForm) {
 export function AdminCoupons() {
   const [coupons, setCoupons] = useState<ApiCoupon[]>([]);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
-  const [products, setProducts] = useState<Array<{ id: string; name: string }>>([]);
+  const [products, setProducts] = useState<Array<{ id: string; name: string; categoryId: number | null }>>([]);
   const [form, setForm] = useState<CouponForm>(emptyForm);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [productSearch, setProductSearch] = useState("");
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [historyItems, setHistoryItems] = useState<AdminProductHistoryItem[]>([]);
@@ -160,6 +187,14 @@ export function AdminCoupons() {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   const flatCategories = useMemo(() => flattenCategories(categories), [categories]);
+  const selectedCategoryIds = useMemo(
+    () => form.category ? categoryIdsInScope(categories, Number(form.category)) : [],
+    [categories, form.category],
+  );
+  const filteredProducts = useMemo(
+    () => products.filter((product) => product.categoryId !== null && selectedCategoryIds.includes(product.categoryId)),
+    [products, selectedCategoryIds],
+  );
 
   async function load() {
     const [nextCoupons, nextCategories, nextProducts] = await Promise.all([
@@ -169,7 +204,11 @@ export function AdminCoupons() {
     ]);
     setCoupons(nextCoupons);
     setCategories(nextCategories);
-    setProducts(nextProducts.map((product) => ({ id: String(product.id), name: product.name })));
+    setProducts(nextProducts.map((product) => ({
+      id: String(product.id),
+      name: product.name,
+      categoryId: product.category_id ?? null,
+    })));
   }
 
   useEffect(() => {
@@ -181,6 +220,14 @@ export function AdminCoupons() {
     setMessage("");
     if (!form.discount_value || (form.usage_limit_mode === "limited" && !form.usage_limit)) {
       setMessage("Nhập giá trị giảm, số lượng/giới hạn nếu đã chọn có giới hạn.");
+      return;
+    }
+    if (categorySearch.trim() && !form.category) {
+      setMessage("Vui lòng chọn một danh mục có trong danh sách gợi ý.");
+      return;
+    }
+    if (form.category && productSearch.trim() && productSearch !== "Tất cả sản phẩm trong danh mục" && !form.product) {
+      setMessage("Vui lòng chọn một sản phẩm có trong danh mục hoặc chọn tất cả sản phẩm.");
       return;
     }
     if (form.expiry_mode === "limited") {
@@ -211,6 +258,8 @@ export function AdminCoupons() {
         setMessage("Đã tạo coupon.");
       }
       setForm(emptyForm);
+      setCategorySearch("");
+      setProductSearch("");
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không lưu được coupon.");
@@ -302,7 +351,7 @@ export function AdminCoupons() {
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
                 <span className="mb-1 block text-neutral-600">Đơn tối thiểu</span>
-                <input type="number" min="0" className="w-full rounded border px-3 py-2" value={form.min_order_amount} onChange={(event) => setForm({ ...form, min_order_amount: event.target.value })} />
+                <input type="text" inputMode="numeric" className="w-full rounded border px-3 py-2" value={form.min_order_amount} onChange={(event) => setForm({ ...form, min_order_amount: formatNumberInput(event.target.value) })} />
               </label>
               <label className="block text-sm">
                 <span className="mb-1 block text-neutral-600">Giảm tối đa</span>
@@ -318,17 +367,34 @@ export function AdminCoupons() {
             </div>
             <label className="block text-sm">
               <span className="mb-1 block text-neutral-600">Loại sản phẩm áp dụng</span>
-              <select className="w-full rounded border px-3 py-2" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>
-                <option value="">Tất cả loại sản phẩm</option>
-                {flatCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-              </select>
+              <CouponCombobox
+                value={categorySearch}
+                placeholder="Nhập hoặc chọn danh mục..."
+                label="danh mục"
+                options={flatCategories.map((category) => ({ id: String(category.id), name: category.name }))}
+                onValueChange={(value, selectedId) => {
+                  setCategorySearch(value);
+                  setProductSearch(selectedId ? "Tất cả sản phẩm trong danh mục" : "");
+                  setForm({ ...form, category: selectedId ?? "", product: "" });
+                }}
+              />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-neutral-600">Sản phẩm áp dụng</span>
-              <select className="w-full rounded border px-3 py-2" value={form.product} onChange={(event) => setForm({ ...form, product: event.target.value })}>
-                <option value="">Tất cả sản phẩm</option>
-                {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-              </select>
+              <CouponCombobox
+                value={productSearch}
+                placeholder={form.category ? "Nhập hoặc chọn sản phẩm..." : "Chọn danh mục trước"}
+                label="sản phẩm"
+                disabled={!form.category}
+                options={[
+                  { id: "", name: "Tất cả sản phẩm trong danh mục" },
+                  ...filteredProducts.map((product) => ({ id: product.id, name: product.name })),
+                ]}
+                onValueChange={(value, selectedId) => {
+                  setProductSearch(value);
+                  setForm({ ...form, product: selectedId ?? "" });
+                }}
+              />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
@@ -392,7 +458,7 @@ export function AdminCoupons() {
             </label>
             <div className="flex gap-2">
               <button disabled={isSaving} className="rounded bg-neutral-950 px-4 py-2 text-white disabled:opacity-60">{isSaving ? "Đang lưu" : "Lưu coupon"}</button>
-              <button type="button" className="rounded border px-4 py-2" onClick={() => setForm(emptyForm)}>Làm mới</button>
+              <button type="button" className="rounded border px-4 py-2" onClick={() => { setForm(emptyForm); setCategorySearch(""); setProductSearch(""); }}>Làm mới</button>
             </div>
           </form>
 
@@ -421,7 +487,12 @@ export function AdminCoupons() {
                     <td className="px-2 py-3">{coupon.end_at ? new Date(coupon.end_at).toLocaleString("vi-VN") : "Vĩnh viễn"}</td>
                     <td className="px-2 py-3">{coupon.is_active ? "Bật" : "Ẩn"}</td>
                     <td className="px-2 py-3 text-right">
-                      <button className="mr-2 rounded border px-2 py-1" onClick={() => setForm(fromCoupon(coupon))}>Sửa</button>
+                      <button className="mr-2 rounded border px-2 py-1" onClick={() => {
+                        const nextForm = fromCoupon(coupon);
+                        setForm(nextForm);
+                        setCategorySearch(flatCategories.find((category) => String(category.id) === nextForm.category)?.name ?? "");
+                        setProductSearch(nextForm.product ? products.find((product) => product.id === nextForm.product)?.name ?? "" : nextForm.category ? "Tất cả sản phẩm trong danh mục" : "");
+                      }}>Sửa</button>
                       <button className="rounded border border-red-200 px-2 py-1 text-red-700" onClick={() => void removeCoupon(coupon)}>Xóa</button>
                     </td>
                   </tr>
@@ -445,5 +516,84 @@ export function AdminCoupons() {
         />
       )}
     </main>
+  );
+}
+
+function CouponCombobox({
+  value,
+  options,
+  placeholder,
+  label,
+  disabled = false,
+  onValueChange,
+}: {
+  value: string;
+  options: Array<{ id: string; name: string }>;
+  placeholder: string;
+  label: string;
+  disabled?: boolean;
+  onValueChange: (value: string, selectedId: string | null) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const normalizedValue = value.trim().toLowerCase();
+  const filteredOptions = showAll
+    ? options
+    : options.filter((option) => option.name.toLowerCase().includes(normalizedValue));
+
+  function updateValue(nextValue: string) {
+    const matched = options.find(
+      (option) => option.name.toLowerCase() === nextValue.trim().toLowerCase(),
+    );
+    onValueChange(nextValue, matched ? matched.id : null);
+    setShowAll(false);
+    setIsOpen(true);
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value}
+        disabled={disabled}
+        onFocus={() => { setShowAll(true); setIsOpen(true); }}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        onChange={(event) => updateValue(event.target.value)}
+        placeholder={placeholder}
+        autoComplete="off"
+        className="w-full rounded border px-3 py-2 pr-10 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => { setShowAll(true); setIsOpen((current) => !current); }}
+        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-neutral-500 disabled:cursor-not-allowed disabled:opacity-40"
+        aria-label={`Mở danh sách ${label}`}
+      >
+        <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+      {isOpen && !disabled && (
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-56 w-full overflow-y-auto rounded border border-neutral-200 bg-white py-1 shadow-lg">
+          {filteredOptions.length ? filteredOptions.map((option) => (
+            <button
+              key={`${label}-${option.id || "all"}`}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onValueChange(option.name, option.id);
+                setShowAll(false);
+                setIsOpen(false);
+              }}
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-100"
+            >
+              {option.name}
+            </button>
+          )) : (
+            <div className="px-3 py-2 text-sm text-neutral-500">Không tìm thấy {label} phù hợp.</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -48,7 +48,7 @@ class StaffProfile(models.Model):
     full_name = models.CharField(max_length=255)
     position = models.CharField(max_length=100)
     department = models.CharField(max_length=100)
-    status = models.CharField(max_length=30, default='active')
+    status = models.CharField(max_length=30, default='working')
     hire_date = models.DateField(null=True, blank=True)
     can_process_orders = models.BooleanField(default=True)
     can_manage_inventory = models.BooleanField(default=True)
@@ -378,7 +378,7 @@ class Order(models.Model):
     PAYMENT_METHOD_CHOICES = [('cod', 'COD'), ('vnpay', 'VNPay'), ('momo', 'MoMo'), ('bank_transfer', 'Bank Transfer')]
 
     order_id = models.BigAutoField(primary_key=True)
-    order_code = models.CharField(max_length=50)
+    order_code = models.CharField(max_length=50, default='')
     user = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='orders')
     address = models.ForeignKey(Address, on_delete=models.PROTECT, db_column='address_id', related_name='orders')
     receiver_name_snapshot = models.CharField(max_length=255, default='')

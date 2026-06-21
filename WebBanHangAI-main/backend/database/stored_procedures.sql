@@ -225,17 +225,18 @@ CREATE OR ALTER PROCEDURE dbo.sp_UpdateOrderStatus
     @OrderId BIGINT,
     @NextStatus NVARCHAR(20),
     @ActorUserId BIGINT = NULL,
-    @CarrierName NVARCHAR(100) = NULL
+    @CarrierName NVARCHAR(100) = NULL,
+    @TrackingCode NVARCHAR(100) = NULL,
+    @Note NVARCHAR(500) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
     DECLARE @OldStatus NVARCHAR(20);
-    DECLARE @TrackingCode NVARCHAR(100) = NULL;
     DECLARE @StaffId BIGINT = NULL;
 
-    IF @NextStatus NOT IN ('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled')
+    IF @NextStatus NOT IN ('confirmed', 'processing', 'waiting_pickup', 'shipped', 'delivered', 'completed')
         THROW 50020, 'Invalid order status.', 1;
 
     BEGIN TRANSACTION;
@@ -251,17 +252,19 @@ BEGIN
     END;
 
     IF NOT (
-        (@OldStatus = 'pending' AND @NextStatus IN ('confirmed', 'cancelled'))
+        (@OldStatus = 'pending' AND @NextStatus = 'confirmed')
         OR (@OldStatus = 'confirmed' AND @NextStatus = 'processing')
-        OR (@OldStatus = 'processing' AND @NextStatus = 'shipped')
+        OR (@OldStatus = 'processing' AND @NextStatus = 'waiting_pickup')
+        OR (@OldStatus = 'waiting_pickup' AND @NextStatus = 'shipped')
         OR (@OldStatus = 'shipped' AND @NextStatus = 'delivered')
+        OR (@OldStatus = 'delivered' AND @NextStatus = 'completed')
     )
     BEGIN
         ROLLBACK TRANSACTION;
         THROW 50022, 'Invalid order status transition.', 1;
     END;
 
-    IF @NextStatus = 'shipped'
+    IF @NextStatus = 'waiting_pickup'
     BEGIN
         IF NULLIF(LTRIM(RTRIM(@CarrierName)), '') IS NULL
         BEGIN
@@ -273,18 +276,17 @@ BEGIN
         FROM dbo.staffs
         WHERE user_id = @ActorUserId;
 
-        SET @TrackingCode = CONCAT(
-            'VN',
-            @OrderId,
-            FORMAT(SYSUTCDATETIME(), 'yyMMddHHmm'),
-            UPPER(LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 6))
-        );
+        IF NULLIF(LTRIM(RTRIM(@TrackingCode)), '') IS NULL
+            SET @TrackingCode = CONCAT(
+                'BKQ', FORMAT(SYSUTCDATETIME(), 'yyMMdd'),
+                RIGHT(CONCAT('00000', @OrderId), 5),
+                UPPER(LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 5))
+            );
 
         UPDATE dbo.shipments
         SET carrier_name = @CarrierName,
             tracking_code = @TrackingCode,
-            shipment_status = 'shipped',
-            shipped_at = SYSUTCDATETIME(),
+            shipment_status = 'waiting_pickup',
             created_by_staff_id = @StaffId,
             updated_at = SYSUTCDATETIME()
         WHERE order_id = @OrderId;
@@ -296,9 +298,31 @@ BEGIN
                 shipped_at, delivered_at, created_by_staff_id, created_at, updated_at
             )
             VALUES (
-                @OrderId, @CarrierName, @TrackingCode, 'shipped',
-                SYSUTCDATETIME(), NULL, @StaffId, SYSUTCDATETIME(), SYSUTCDATETIME()
+                @OrderId, @CarrierName, @TrackingCode, 'waiting_pickup',
+                NULL, NULL, @StaffId, SYSUTCDATETIME(), SYSUTCDATETIME()
             );
+        END;
+    END;
+
+    IF @NextStatus IN ('shipped', 'delivered', 'completed')
+    BEGIN
+        UPDATE dbo.shipments
+        SET shipment_status = @NextStatus,
+            shipped_at = CASE
+                WHEN @NextStatus = 'shipped' AND shipped_at IS NULL THEN SYSUTCDATETIME()
+                ELSE shipped_at
+            END,
+            delivered_at = CASE
+                WHEN @NextStatus IN ('delivered', 'completed') AND delivered_at IS NULL THEN SYSUTCDATETIME()
+                ELSE delivered_at
+            END,
+            updated_at = SYSUTCDATETIME()
+        WHERE order_id = @OrderId;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+            THROW 50024, 'Shipment was not found for this order.', 1;
         END;
     END;
 
@@ -311,7 +335,9 @@ BEGIN
         order_id, old_status, new_status, note, changed_by_user_id, created_at
     )
     VALUES (
-        @OrderId, @OldStatus, @NextStatus, NULL, @ActorUserId, SYSUTCDATETIME()
+        @OrderId, @OldStatus, @NextStatus,
+        COALESCE(NULLIF(LTRIM(RTRIM(@Note)), ''), CONCAT(N'Status changed to ', @NextStatus)),
+        @ActorUserId, SYSUTCDATETIME()
     );
 
     COMMIT TRANSACTION;
@@ -375,7 +401,7 @@ BEGIN
         pv.variant_id,
         @OrderId,
         s.staff_id,
-        'cancel_restore',
+        'release',
         pv.stock_quantity - i.quantity,
         i.quantity,
         pv.stock_quantity,

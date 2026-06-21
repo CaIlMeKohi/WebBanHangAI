@@ -25,6 +25,11 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
   const { userId } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const discountPercent = product.discountPercent ?? (
+    product.originalPrice && product.originalPrice > product.price
+      ? Math.round((1 - product.price / product.originalPrice) * 100)
+      : 0
+  );
 
   const redirectToLogin = () => {
     const next = `${location.pathname}${location.search}`;
@@ -107,9 +112,9 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
               Mới
             </span>
           )}
-          {product.originalPrice && (
+          {product.originalPrice && discountPercent > 0 && (
             <span className="bg-neutral-900 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-white">
-              Sale
+              Giảm {discountPercent}%
             </span>
           )}
         </div>

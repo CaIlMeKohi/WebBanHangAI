@@ -51,16 +51,16 @@ export function Recommendations() {
   }, [refreshKey, userId]);
 
   return (
-    <main className="min-h-screen bg-white text-neutral-950">
-      <section className="border-b bg-neutral-50">
+    <main className="min-h-screen bg-white text-neutral-950 dark:bg-neutral-950 dark:text-white">
+      <section className="border-b bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-5 px-4 py-10 sm:px-6 lg:px-8">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-neutral-600">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-neutral-600 dark:text-neutral-300">
               <Sparkles className="h-4 w-4" />
               AI Picks
             </div>
             <h1 className="text-3xl font-light">Dành cho bạn</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-600">
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-600 dark:text-neutral-300">
               Gợi ý được cập nhật từ tìm kiếm, lượt xem, yêu thích, giỏ hàng và lịch sử mua của bạn.
             </p>
           </div>
@@ -88,8 +88,8 @@ export function Recommendations() {
           </div>
         ) : products.length ? (
           <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
-            <aside className="border bg-neutral-50 p-4">
-              <p className="text-sm font-medium leading-6 text-neutral-900">
+            <aside className="border bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900">
+              <p className="text-sm font-medium leading-6 text-neutral-900 dark:text-white">
                 Các sản phẩm bạn đã xem gần đây liên quan đến:
               </p>
               <div className="mt-4 space-y-2">
@@ -97,7 +97,7 @@ export function Recommendations() {
                   <Link
                     key={type.slug}
                     to={`/shop?category=${encodeURIComponent(type.slug)}`}
-                    className="block rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 transition-colors hover:border-neutral-900 hover:text-neutral-950"
+                    className="block rounded-full border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 transition-colors hover:border-neutral-900 hover:text-neutral-950 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200 dark:hover:border-white dark:hover:text-white"
                   >
                     {type.label}
                   </Link>
@@ -150,7 +150,7 @@ function getObservedProductTypes(products: Product[]) {
 
 function Signal({ icon, text }: { icon: ReactNode; text: string }) {
   return (
-    <div className="flex items-center gap-2 border bg-white px-3 py-3 text-sm text-neutral-600">
+    <div className="flex items-center gap-2 border bg-white px-3 py-3 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
       {icon}
       {text}
     </div>

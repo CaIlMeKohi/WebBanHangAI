@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { StaffProtectedRoute } from "../../components/StaffProtectedRoute";
 import { useAdminAuth } from "../../context/AdminAuthContext";
+import { usePortalLightTheme } from "../../lib/usePortalLightTheme";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 
@@ -88,7 +89,7 @@ const statusLabels: Record<OrderStatus, string> = {
   shipped: "Đang giao",
   delivered: "Đã giao hàng",
   completed: "Hoàn thành",
-  cancelled: "Hủy đơn",
+  cancelled: "Đã hủy",
 };
 
 const actionLabels: Record<OrderStatus, string> = {
@@ -148,6 +149,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export function StaffPortal() {
+  usePortalLightTheme();
   return (
     <StaffProtectedRoute>
       <StaffPortalContent />
@@ -207,10 +209,14 @@ function StaffPortalContent() {
       setShipmentError("");
       return;
     }
-    const body: Record<string, string> = { status };
-    await api(`/staff/orders/${orderId}/status`, { method: "PUT", body: JSON.stringify(body) });
-    setMessage("Đã cập nhật đơn hàng");
-    await load();
+    try {
+      const body: Record<string, string> = { status };
+      await api(`/staff/orders/${orderId}/status`, { method: "PUT", body: JSON.stringify(body) });
+      setMessage(status === "cancelled" ? "Đã hủy đơn hàng" : "Đã cập nhật đơn hàng");
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể cập nhật đơn hàng");
+    }
   }
 
   async function submitShipmentForm(event: React.FormEvent<HTMLFormElement>) {
@@ -341,6 +347,7 @@ function StaffPortalContent() {
               <option value="shipped">Đang giao</option>
               <option value="delivered">Đã giao hàng</option>
               <option value="completed">Hoàn thành</option>
+              <option value="cancelled">Đã hủy</option>
             </select>
             <select className="rounded border p-2" value={filters.payment_method} onChange={(event) => setFilters({ ...filters, payment_method: event.target.value })}>
               <option value="">Mọi thanh toán</option>

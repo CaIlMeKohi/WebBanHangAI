@@ -10,9 +10,11 @@ import {
   Users,
 } from "lucide-react";
 import { useAdminAuth } from "../../context/AdminAuthContext";
+import { usePortalLightTheme } from "../../lib/usePortalLightTheme";
 import { ProtectedRoute } from "../ProtectedRoute";
 
 export function AdminLayout() {
+  usePortalLightTheme();
   const navigate = useNavigate();
   const { logout, username, role } = useAdminAuth();
 

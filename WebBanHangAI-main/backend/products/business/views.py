@@ -331,52 +331,20 @@ class StaffOrderStatusAPIView(APIView):
             if next_status == 'cancelled':
                 cancel_order_and_restore_stock(order.order_id, request.user.user_id if request.user else None, note or 'Staff cancelled order')
             else:
-                self._apply_status(order, next_status, request.user, carrier, tracking_code, note)
+                update_order_status(
+                    order.order_id,
+                    next_status,
+                    request.user.user_id if request.user else None,
+                    carrier,
+                    tracking_code or None,
+                    note or None,
+                )
         except DatabaseError:
             return Response({'detail': 'Không thể cập nhật trạng thái đơn hàng'}, status=status.HTTP_400_BAD_REQUEST)
         order = Order.objects.filter(order_id=order_id).prefetch_related('items', 'items__product', 'status_histories').first()
         notify(order.user.user, 'Cap nhat don hang', f'Don #{order.order_id} da chuyen sang {next_status}', 'order')
         send_order_status_email(order.user.user.email, order.order_id, next_status)
         return Response(OrderDetailSerializer(order).data)
-
-    @transaction.atomic
-    def _apply_status(self, order, next_status, actor, carrier_name=None, tracking_code='', note=''):
-        old_status = order.status
-        order.status = next_status
-        order.updated_at = timezone.now()
-        order.save(update_fields=['status', 'updated_at'])
-
-        if next_status == 'waiting_pickup':
-            staff_profile = StaffProfile.objects.filter(user=actor).first()
-            Shipment.objects.update_or_create(
-                order=order,
-                defaults={
-                    'carrier_name': carrier_name,
-                    'tracking_code': tracking_code,
-                    'shipment_status': 'waiting_pickup',
-                    'created_by_staff': staff_profile,
-                    'updated_at': timezone.now(),
-                },
-            )
-        elif next_status in {'shipped', 'delivered', 'completed'}:
-            shipment = Shipment.objects.filter(order=order).first()
-            if shipment:
-                shipment.shipment_status = next_status
-                if next_status == 'shipped' and shipment.shipped_at is None:
-                    shipment.shipped_at = timezone.now()
-                if next_status in {'delivered', 'completed'} and shipment.delivered_at is None:
-                    shipment.delivered_at = timezone.now()
-                shipment.updated_at = timezone.now()
-                shipment.save(update_fields=['shipment_status', 'shipped_at', 'delivered_at', 'updated_at'])
-
-        OrderStatusHistory.objects.create(
-            order=order,
-            from_status=old_status,
-            to_status=next_status,
-            note=note or f'Status changed to {next_status}',
-            changed_by=actor,
-        )
-
 
 class AdminOrderListAPIView(CleanAdminOrderListAPIView):
     """Compatibility wrapper for the existing admin order list route."""

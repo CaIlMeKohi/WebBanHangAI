@@ -264,7 +264,6 @@ class Command(BaseCommand):
                     "short_description": item.get("short_description", ""),
                     "description": item["description"],
                     "price": item["base_price"],
-                    "sale_price": None,
                     "stock_quantity": sum(variant.get("stock_quantity", 0) for variant in item["variants"]),
                     "base_price": item["base_price"],
                     "brand": brands_by_slug[item["brand_slug"]],
