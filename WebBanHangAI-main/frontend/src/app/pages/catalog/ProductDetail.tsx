@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Trash2,
   Truck,
 } from "lucide-react";
 
@@ -16,9 +17,12 @@ import type { Product } from "../../data/products";
 import {
   addCartItem,
   addWishlistItem,
+  deleteProductReview,
   fetchProductById,
+  fetchProductReviews,
   fetchRelatedProducts,
   fetchWishlist,
+  type ProductReview,
 } from "../../lib/api";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import { CART_UPDATED_EVENT, addStoredCartItem } from "../../lib/cartStorage";
@@ -35,11 +39,15 @@ import {
 
 export function ProductDetail() {
   const { id } = useParams<{ id: string }>();
-  const { userId } = useAdminAuth();
+  const { userId, role } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [product, setProduct] = useState<Product | undefined>();
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [reviewToDelete, setReviewToDelete] = useState<ProductReview | null>(null);
+  const [reviewDeleteError, setReviewDeleteError] = useState("");
+  const [isDeletingReview, setIsDeletingReview] = useState(false);
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedColor, setSelectedColor] = useState("");
   const [quantity, setQuantity] = useState(1);
@@ -76,17 +84,20 @@ export function ProductDetail() {
       setIsLoading(true);
       try {
         const apiProduct = await fetchProductById(id as string);
-        const apiRelated = await fetchRelatedProducts(id as string, 4).catch(
-          () => [],
-        );
+        const [apiRelated, apiReviews] = await Promise.all([
+          fetchRelatedProducts(id as string, 4).catch(() => []),
+          fetchProductReviews(id as string).catch(() => []),
+        ]);
         if (isMounted) {
           setProduct(apiProduct);
           setRelatedProducts(apiRelated);
+          setReviews(apiReviews);
         }
       } catch {
         if (isMounted) {
           setProduct(undefined);
           setRelatedProducts([]);
+          setReviews([]);
         }
       } finally {
         if (isMounted) setIsLoading(false);
@@ -163,6 +174,14 @@ export function ProductDetail() {
             100,
         )
       : null;
+  const reviewAverage = reviews.length
+    ? reviews.reduce((total, review) => total + review.rating, 0) / reviews.length
+    : Number(product.rating || 0);
+  const reviewTotal = reviews.length || Number(product.reviews || 0);
+  const reviewDistribution = [5, 4, 3, 2, 1].map((rating) => ({
+    rating,
+    count: reviews.filter((review) => review.rating === rating).length,
+  }));
 
   const handleAddToCart = async () => {
     const size = selectedSize || product.sizes[0] || "STD";
@@ -193,6 +212,26 @@ export function ProductDetail() {
     await handleAddToCart();
     if (userId) {
       navigate("/cart");
+    }
+  };
+
+  const handleDeleteReview = async () => {
+    if (!reviewToDelete || !id || role !== "admin") return;
+    setIsDeletingReview(true);
+    setReviewDeleteError("");
+    try {
+      await deleteProductReview(reviewToDelete.review_id);
+      const [nextReviews, nextProduct] = await Promise.all([
+        fetchProductReviews(id).catch(() => []),
+        fetchProductById(id),
+      ]);
+      setReviews(nextReviews);
+      setProduct(nextProduct);
+      setReviewToDelete(null);
+    } catch (error) {
+      setReviewDeleteError(error instanceof Error ? error.message : "Không thể xóa đánh giá.");
+    } finally {
+      setIsDeletingReview(false);
     }
   };
 
@@ -518,6 +557,118 @@ export function ProductDetail() {
           </div>
         </div>
 
+        <section className="mt-16 border-t border-neutral-200 pt-12 dark:border-neutral-800">
+          <div className="mb-8">
+            <h2 className="text-2xl font-light tracking-wide">Đánh giá sản phẩm</h2>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              Đánh giá từ khách hàng đã mua sản phẩm
+            </p>
+          </div>
+
+          <div className="grid gap-10 lg:grid-cols-[280px_1fr]">
+            <div className="lg:border-r lg:border-neutral-200 lg:pr-10 dark:lg:border-neutral-800">
+              <div className="flex items-end gap-2">
+                <strong className="text-5xl font-light leading-none">{reviewAverage.toFixed(1)}</strong>
+                <span className="pb-1 text-sm text-neutral-500">/ 5</span>
+              </div>
+              <div className="mt-3 flex gap-1" aria-label={`${reviewAverage.toFixed(1)} trên 5 sao`}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Star
+                    key={star}
+                    className={`h-5 w-5 ${star <= Math.round(reviewAverage) ? "fill-neutral-900 text-neutral-900 dark:fill-white dark:text-white" : "text-neutral-300 dark:text-neutral-700"}`}
+                  />
+                ))}
+              </div>
+              <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+                {reviewTotal} đánh giá
+              </p>
+
+              <div className="mt-6 space-y-2.5">
+                {reviewDistribution.map(({ rating, count }) => (
+                  <div key={rating} className="grid grid-cols-[28px_1fr_26px] items-center gap-2 text-xs">
+                    <span>{rating}★</span>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+                      <div
+                        className="h-full rounded-full bg-neutral-900 dark:bg-white"
+                        style={{ width: `${reviews.length ? (count / reviews.length) * 100 : 0}%` }}
+                      />
+                    </div>
+                    <span className="text-right text-neutral-500">{count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              {reviews.length > 0 ? (
+                <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                  {reviews.map((review) => (
+                    <article key={review.review_id} className="py-6 first:pt-0">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="font-medium">Khách hàng #{review.user_id ?? "-"}</div>
+                          <div className="mt-1 flex gap-0.5">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <Star
+                                key={star}
+                                className={`h-4 w-4 ${star <= review.rating ? "fill-neutral-900 text-neutral-900 dark:fill-white dark:text-white" : "text-neutral-300 dark:text-neutral-700"}`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {review.created_at && (
+                            <time className="text-xs text-neutral-500">
+                              {new Date(review.created_at).toLocaleDateString("vi-VN")}
+                            </time>
+                          )}
+                          {role === "admin" && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReviewToDelete(review);
+                                setReviewDeleteError("");
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/30"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Xóa
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {review.comment && (
+                        <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-neutral-700 dark:text-neutral-300">
+                          {review.comment}
+                        </p>
+                      )}
+                      {review.image_urls && review.image_urls.length > 0 && (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {review.image_urls.map((imageUrl, index) => (
+                            <a key={`${imageUrl}-${index}`} href={imageUrl} target="_blank" rel="noreferrer">
+                              <img
+                                src={imageUrl}
+                                alt={`Ảnh đánh giá ${index + 1}`}
+                                className="h-20 w-20 rounded border border-neutral-200 object-cover dark:border-neutral-800"
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="border border-dashed border-neutral-300 px-6 py-12 text-center text-sm text-neutral-500 dark:border-neutral-700">
+                  {reviewTotal > 0
+                    ? "Sản phẩm đã có điểm đánh giá tổng hợp nhưng chưa có nội dung đánh giá chi tiết."
+                    : "Sản phẩm chưa có đánh giá từ khách hàng."}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
         <section className="mx-[-1rem] mt-16 bg-gradient-to-b from-blue-50/30 to-white px-4 py-12 dark:from-blue-950/10 dark:to-neutral-900 sm:mx-[-1.5rem] sm:px-6 lg:mx-[-2rem] lg:px-8">
           <div className="mb-8 flex items-center gap-3">
             <div className="rounded-lg bg-blue-100 p-2 dark:bg-blue-900">
@@ -546,6 +697,40 @@ export function ProductDetail() {
             </p>
           )}
         </section>
+
+        {reviewToDelete && role === "admin" && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-neutral-900">
+              <h3 className="text-xl font-medium">Xóa đánh giá</h3>
+              <p className="mt-3 text-sm leading-6 text-neutral-600 dark:text-neutral-300">
+                Bạn có chắc muốn xóa đánh giá {reviewToDelete.rating} sao này không? Ảnh của đánh giá cũng sẽ bị xóa khỏi Cloudinary.
+              </p>
+              {reviewDeleteError && (
+                <div className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
+                  {reviewDeleteError}
+                </div>
+              )}
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isDeletingReview}
+                  onClick={() => setReviewToDelete(null)}
+                  className="rounded border px-4 py-2 text-sm disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingReview}
+                  onClick={() => void handleDeleteReview()}
+                  className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {isDeletingReview ? "Đang xóa..." : "Xóa đánh giá"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -687,11 +687,16 @@ class AddressSerializer(serializers.ModelSerializer):
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
+    has_review = serializers.SerializerMethodField()
+
+    def get_has_review(self, obj: OrderItem) -> bool:
+        return obj.reviews.exists()
 
     class Meta:
         model = OrderItem
         fields = [
             'order_item_id',
+            'has_review',
             'product',
             'variant_id',
             'quantity',

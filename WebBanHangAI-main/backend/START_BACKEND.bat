@@ -45,11 +45,27 @@ set "VENV_PY=venv\Scripts\python.exe"
 
 echo [INFO] Build frontend de dong bo source moi nhat...
 pushd ..\frontend
-if not exist "node_modules" (
-  echo [INFO] Cai dat frontend dependencies...
-  call npm install || goto :error
+if not exist "package.json" (
+  echo [ERROR] Khong tim thay frontend\package.json.
+  popd
+  goto :error
 )
-call npm run build || goto :error
+where npm >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Khong tim thay npm trong PATH.
+  echo [HINT] Hay cai Node.js LTS, dong terminal, sau do chay lai START_PROJECT.bat.
+  popd
+  goto :error
+)
+if not exist "node_modules\.bin\tsc.cmd" (
+  echo [INFO] Thieu TypeScript, dang cai dat frontend dependencies...
+  call npm install || goto :frontend_error
+)
+if not exist "node_modules\.bin\vite.cmd" (
+  echo [INFO] Thieu Vite, dang cai dat frontend dependencies...
+  call npm install || goto :frontend_error
+)
+call npm run build || goto :frontend_error
 popd
 
 set "REQ_FILE=requirements.txt"
@@ -76,6 +92,10 @@ echo [INFO] Khoi dong server tai http://localhost:8000 ...
 echo [INFO] Mo http://127.0.0.1:5173 de frontend tu cap nhat khi sua code.
 "%VENV_PY%" manage.py runserver
 goto :eof
+
+:frontend_error
+popd
+goto :error
 
 :error
 echo.

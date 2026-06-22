@@ -28,6 +28,7 @@ export interface ApiOrder {
   created_at: string;
   items: Array<{
     order_item_id: number;
+    has_review?: boolean;
     product: Product;
     variant_id?: number | null;
     quantity: number;

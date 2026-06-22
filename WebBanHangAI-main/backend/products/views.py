@@ -514,6 +514,51 @@ class StaffOrderStatusAPIView(CleanStaffOrderStatusAPIView):
 class InventoryAdjustAPIView(CleanInventoryAdjustAPIView):
     """Compatibility wrapper for the existing inventory adjust/import routes."""
 
+    def post(self, request):
+        variant_id = request.data.get('variant_id')
+        before_variant = ProductVariant.objects.select_related('product').filter(variant_id=variant_id).first()
+        old_value = None
+        if before_variant is not None:
+            old_value = {
+                'product_id': before_variant.product_id,
+                'product_name': before_variant.product.name,
+                'variant_id': before_variant.variant_id,
+                'sku': before_variant.sku,
+                'color': before_variant.color,
+                'size': before_variant.size,
+                'stock_quantity': before_variant.stock_quantity,
+                'stock_reserved': before_variant.stock_reserved,
+            }
+        response = super().post(request)
+        if response.status_code == status.HTTP_200_OK and before_variant is not None:
+            after_variant = ProductVariant.objects.select_related('product').filter(variant_id=variant_id).first()
+            quantity = request.data.get('change_quantity')
+            try:
+                quantity_value = int(quantity)
+            except (TypeError, ValueError):
+                quantity_value = 0
+            action_name = 'import_stock' if quantity_value > 0 else 'adjust_stock'
+            AuditLog.objects.create(
+                actor=request.user,
+                action=action_name,
+                entity_type='product',
+                entity_id=str(before_variant.product_id),
+                old_value=old_value,
+                metadata={
+                    'product_id': after_variant.product_id if after_variant else before_variant.product_id,
+                    'product_name': after_variant.product.name if after_variant else before_variant.product.name,
+                    'variant_id': after_variant.variant_id if after_variant else before_variant.variant_id,
+                    'sku': after_variant.sku if after_variant else before_variant.sku,
+                    'color': after_variant.color if after_variant else before_variant.color,
+                    'size': after_variant.size if after_variant else before_variant.size,
+                    'stock_quantity': after_variant.stock_quantity if after_variant else before_variant.stock_quantity,
+                    'stock_reserved': after_variant.stock_reserved if after_variant else before_variant.stock_reserved,
+                    'change_quantity': quantity_value,
+                    'reason': request.data.get('reason', ''),
+                },
+            )
+        return response
+
 
 class LowStockAPIView(CleanLowStockAPIView):
     """Compatibility wrapper for the existing low stock route."""

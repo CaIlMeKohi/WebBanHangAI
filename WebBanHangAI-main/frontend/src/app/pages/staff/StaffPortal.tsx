@@ -1,7 +1,16 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { ClipboardList, History, PackageSearch } from "lucide-react";
+import { AdminAuditHistoryModal } from "../../components/admin/AdminAuditHistoryModal";
 import { StaffProtectedRoute } from "../../components/StaffProtectedRoute";
 import { useAdminAuth } from "../../context/AdminAuthContext";
+import type { CategoryNode, Product } from "../../data/products";
+import {
+  fetchAdminAuditLogs,
+  fetchCategories,
+  fetchProductPage,
+  type AdminProductHistoryItem,
+} from "../../lib/api";
 import { usePortalLightTheme } from "../../lib/usePortalLightTheme";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
@@ -159,6 +168,7 @@ export function StaffPortal() {
 
 function StaffPortalContent() {
   const { logout } = useAdminAuth();
+  const [activePortalTab, setActivePortalTab] = useState<"orders" | "products">("orders");
   const [orders, setOrders] = useState<StaffOrder[]>([]);
   const [returns, setReturns] = useState<any[]>([]);
   const [lowStock, setLowStock] = useState<any[]>([]);
@@ -174,6 +184,18 @@ function StaffPortalContent() {
   const [shipmentForm, setShipmentForm] = useState<ShipmentForm>({ carrier_name: "", tracking_code: "", note: "" });
   const [shipmentError, setShipmentError] = useState("");
   const [isSavingShipment, setIsSavingShipment] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [catalogCategories, setCatalogCategories] = useState<CategoryNode[]>([]);
+  const [catalogCount, setCatalogCount] = useState(0);
+  const [catalogPage, setCatalogPage] = useState(1);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogCategory, setCatalogCategory] = useState("");
+  const [isCatalogLoading, setIsCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+  const [historyItems, setHistoryItems] = useState<AdminProductHistoryItem[]>([]);
+  const [historyTitle, setHistoryTitle] = useState("");
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   async function load() {
     const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
@@ -200,6 +222,34 @@ function StaffPortalContent() {
   useEffect(() => {
     load().catch((error) => setMessage(error.message));
   }, [filters.status, filters.payment_method, filters.from_date, filters.to_date]);
+
+  useEffect(() => {
+    fetchCategories().then(setCatalogCategories).catch(() => setCatalogCategories([]));
+  }, []);
+
+  useEffect(() => {
+    if (activePortalTab !== "products") return;
+    const timer = window.setTimeout(async () => {
+      setIsCatalogLoading(true);
+      setCatalogError("");
+      try {
+        const page = await fetchProductPage({
+          page: catalogPage,
+          search: catalogSearch.trim() || undefined,
+          category: catalogCategory || undefined,
+        });
+        setCatalogProducts(page.results);
+        setCatalogCount(page.count);
+      } catch (error) {
+        setCatalogProducts([]);
+        setCatalogCount(0);
+        setCatalogError(error instanceof Error ? error.message : "Không thể tải sản phẩm.");
+      } finally {
+        setIsCatalogLoading(false);
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activePortalTab, catalogCategory, catalogPage, catalogSearch]);
 
   async function updateOrder(orderId: number, status: OrderStatus) {
     if (status === "waiting_pickup") {
@@ -264,6 +314,44 @@ function StaffPortalContent() {
     await load();
   }
 
+  async function openOrderHistory() {
+    setHistoryTitle("Lịch sử chỉnh sửa đơn hàng");
+    setHistoryItems([]);
+    setIsHistoryOpen(true);
+    setIsHistoryLoading(true);
+    try {
+      setHistoryItems(
+        await fetchAdminAuditLogs({
+          entity_type: "order",
+          action: ["update_order_status"],
+        }),
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể tải lịch sử đơn hàng.");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
+  async function openProductHistory() {
+    setHistoryTitle("Lịch sử chỉnh sửa sản phẩm");
+    setHistoryItems([]);
+    setIsHistoryOpen(true);
+    setIsHistoryLoading(true);
+    try {
+      setHistoryItems(
+        await fetchAdminAuditLogs({
+          entity_type: "product",
+          action: ["create_product", "update_product", "delete_product", "import_stock", "adjust_stock"],
+        }),
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể tải lịch sử sản phẩm.");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
   function openStockModal(action: StockAction) {
     setStockModal(action);
     setStockForm({
@@ -321,24 +409,54 @@ function StaffPortalContent() {
   }
 
   return (
-    <main className="min-h-screen bg-neutral-50 px-4 py-8">
+    <main className="min-h-screen bg-[linear-gradient(180deg,#f8fafc_0%,#f3f4f6_100%)] px-4 py-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <header className="flex flex-wrap items-center justify-between gap-3">
+        <header className="flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">Cổng nhân viên</h1>
           <div className="flex gap-2">
-            <Link className="rounded-md border bg-white px-4 py-2" to="/">Trang chủ</Link>
-            <button className="rounded-md border bg-white px-4 py-2" onClick={() => openStockModal("import")}>Nhập kho</button>
-            <button className="rounded-md bg-neutral-950 px-4 py-2 text-white" onClick={() => openStockModal("adjust")}>Điều chỉnh kho</button>
-            <button className="rounded-md border border-red-200 bg-white px-4 py-2 text-red-700" onClick={logout}>Đăng xuất</button>
+            <Link className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors hover:border-neutral-400" to="/">Trang chủ</Link>
+            <button className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition-colors hover:border-neutral-400" onClick={() => openStockModal("import")}>Nhập kho</button>
+            <button className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-neutral-800" onClick={() => openStockModal("adjust")}>Điều chỉnh kho</button>
+            <button className="rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:border-red-300" onClick={logout}>Đăng xuất</button>
           </div>
         </header>
 
-        {message && <div className="rounded-md border bg-white p-3 text-sm">{message}</div>}
+        <nav className="flex gap-2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setActivePortalTab("orders")}
+            className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium ${activePortalTab === "orders" ? "border-neutral-950 text-neutral-950" : "border-transparent text-neutral-500 hover:text-neutral-950"}`}
+          >
+            <ClipboardList className="h-4 w-4" />
+            Đơn hàng
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePortalTab("products")}
+            className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium ${activePortalTab === "products" ? "border-neutral-950 text-neutral-950" : "border-transparent text-neutral-500 hover:text-neutral-950"}`}
+          >
+            <PackageSearch className="h-4 w-4" />
+            Sản phẩm
+          </button>
+        </nav>
 
-        <section className="rounded-lg border bg-white p-4">
-          <h2 className="mb-3 font-semibold">Đơn hàng cần xử lý</h2>
+        {message && <div className="rounded-2xl border border-neutral-200 bg-white p-3 text-sm shadow-sm">{message}</div>}
+
+        {activePortalTab === "orders" && <>
+        <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-semibold">Đơn hàng cần xử lý</h2>
+            <button
+              type="button"
+              onClick={openOrderHistory}
+              className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:border-neutral-400 hover:bg-neutral-50"
+            >
+              <History className="h-4 w-4" />
+              Xem lịch sử
+            </button>
+          </div>
           <div className="mb-4 grid gap-2 md:grid-cols-4">
-            <select className="rounded border p-2" value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
+            <select className="rounded-xl border border-neutral-200 bg-white p-3 text-sm outline-none focus:border-neutral-950" value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
               <option value="">Mọi trạng thái</option>
               <option value="pending">Chờ xử lý</option>
               <option value="confirmed">Xác nhận</option>
@@ -349,15 +467,15 @@ function StaffPortalContent() {
               <option value="completed">Hoàn thành</option>
               <option value="cancelled">Đã hủy</option>
             </select>
-            <select className="rounded border p-2" value={filters.payment_method} onChange={(event) => setFilters({ ...filters, payment_method: event.target.value })}>
+            <select className="rounded-xl border border-neutral-200 bg-white p-3 text-sm outline-none focus:border-neutral-950" value={filters.payment_method} onChange={(event) => setFilters({ ...filters, payment_method: event.target.value })}>
               <option value="">Mọi thanh toán</option>
               <option value="cod">COD</option>
               <option value="vnpay">VNPay</option>
               <option value="momo">MoMo</option>
               <option value="bank_transfer">Chuyển khoản</option>
             </select>
-            <input className="rounded border p-2" type="date" value={filters.from_date} onChange={(event) => setFilters({ ...filters, from_date: event.target.value })} />
-            <input className="rounded border p-2" type="date" value={filters.to_date} onChange={(event) => setFilters({ ...filters, to_date: event.target.value })} />
+            <input className="rounded-xl border border-neutral-200 bg-white p-3 text-sm outline-none focus:border-neutral-950" type="date" value={filters.from_date} onChange={(event) => setFilters({ ...filters, from_date: event.target.value })} />
+            <input className="rounded-xl border border-neutral-200 bg-white p-3 text-sm outline-none focus:border-neutral-950" type="date" value={filters.to_date} onChange={(event) => setFilters({ ...filters, to_date: event.target.value })} />
           </div>
 
           <div className="overflow-x-auto">
@@ -379,9 +497,9 @@ function StaffPortalContent() {
                     <td className="px-2 py-3">{statusLabels[order.status] ?? order.status}</td>
                     <td className="px-2 py-3">{order.payment_method}</td>
                     <td className="space-x-2 px-2 py-3">
-                      <button className="rounded border px-2 py-1" onClick={() => setSelectedOrder(order)}>Chi tiết sản phẩm</button>
+                      <button className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium hover:border-neutral-400 hover:bg-neutral-50" onClick={() => setSelectedOrder(order)}>Chi tiết sản phẩm</button>
                       {(nextStatuses[order.status] ?? []).map((status) => (
-                        <button key={status} className="rounded border px-2 py-1" onClick={() => updateOrder(order.order_id, status)}>
+                        <button key={status} className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium hover:border-neutral-400 hover:bg-neutral-50" onClick={() => updateOrder(order.order_id, status)}>
                           {actionLabels[status] ?? status}
                         </button>
                       ))}
@@ -398,30 +516,119 @@ function StaffPortalContent() {
         <section className="grid gap-4">
           <Panel title="Đổi trả / khiếu nại">
             {returns.map((item) => (
-              <div key={item.return_id} className="rounded border p-3 text-sm">
+              <div key={item.return_id} className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm">
                 <b>#{item.return_id} - {item.status}</b>
                 <p>{item.reason}</p>
                 <div className="mt-2 space-x-2">
                   {["approved", "rejected", "completed"].map((status) => (
-                    <button key={status} className="rounded border px-2 py-1" onClick={() => updateReturn(item.return_id, status)}>{status}</button>
+                    <button key={status} className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium hover:border-neutral-400 hover:bg-neutral-50" onClick={() => updateReturn(item.return_id, status)}>{status}</button>
                   ))}
                 </div>
               </div>
             ))}
           </Panel>
         </section>
+        </>}
 
-        <Panel title="Cảnh báo tồn kho thấp">
-          <div className="grid gap-2 md:grid-cols-3">
-            {lowStock.map((item) => (
-              <div key={item.variant_id} className="rounded border p-3 text-sm">
-                <b>{item.sku}</b>
-                <div>{item.color} / {item.size}</div>
-                <div>Tồn: {item.stock_quantity}</div>
+        {activePortalTab === "products" && (
+          <div className="space-y-6">
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="font-semibold">Sản phẩm</h2>
+                  <p className="text-sm text-neutral-500">{catalogCount.toLocaleString("vi-VN")} sản phẩm trong hệ thống</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={openProductHistory}
+                    className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:border-neutral-400 hover:bg-neutral-50"
+                  >
+                    <History className="h-4 w-4" />
+                    Xem lịch sử
+                  </button>
+                  <input
+                    value={catalogSearch}
+                    onChange={(event) => { setCatalogSearch(event.target.value); setCatalogPage(1); }}
+                    placeholder="Tìm sản phẩm..."
+                    className="rounded border px-3 py-2 text-sm"
+                  />
+                  <select
+                    value={catalogCategory}
+                    onChange={(event) => { setCatalogCategory(event.target.value); setCatalogPage(1); }}
+                    className="rounded border px-3 py-2 text-sm"
+                  >
+                    <option value="">Mọi danh mục</option>
+                    {flattenCategories(catalogCategories).map((category) => (
+                      <option key={category.slug} value={category.slug}>{category.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            ))}
+
+              {catalogError && <div className="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{catalogError}</div>}
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="border-y bg-neutral-50">
+                    <tr>
+                      <th className="px-3 py-2">Sản phẩm</th>
+                      <th className="px-3 py-2">Danh mục</th>
+                      <th className="px-3 py-2">Thương hiệu</th>
+                      <th className="px-3 py-2">Giá</th>
+                      <th className="px-3 py-2">Tồn kho</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {!isCatalogLoading && catalogProducts.map((product) => (
+                      <tr key={product.id} className="border-b">
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-3">
+                            <img src={product.image} alt={product.name} className="h-12 w-10 rounded object-cover bg-neutral-100" />
+                            <Link to={`/product/${product.id}`} className="max-w-xs font-medium hover:underline">{product.name}</Link>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">{product.categoryName ?? product.category}</td>
+                        <td className="px-3 py-3">{product.brandName ?? "-"}</td>
+                        <td className="px-3 py-3">{Number(product.price).toLocaleString("vi-VN")}đ</td>
+                        <td className="px-3 py-3">{product.stockQuantity ?? 0}</td>
+                      </tr>
+                    ))}
+                    {isCatalogLoading && <tr><td colSpan={5} className="px-3 py-10 text-center text-neutral-500">Đang tải sản phẩm...</td></tr>}
+                    {!isCatalogLoading && !catalogProducts.length && <tr><td colSpan={5} className="px-3 py-10 text-center text-neutral-500">Không có sản phẩm phù hợp.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button disabled={catalogPage <= 1 || isCatalogLoading} onClick={() => setCatalogPage((page) => page - 1)} className="rounded border px-3 py-2 text-sm disabled:opacity-40">Trang trước</button>
+                <span className="text-sm">Trang {catalogPage}</span>
+                <button disabled={catalogPage * 32 >= catalogCount || isCatalogLoading} onClick={() => setCatalogPage((page) => page + 1)} className="rounded border px-3 py-2 text-sm disabled:opacity-40">Trang sau</button>
+              </div>
+            </section>
+
+            <Panel title="Danh mục sản phẩm">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {flattenCategories(catalogCategories).map((category) => (
+                  <button key={category.slug} type="button" onClick={() => { setCatalogCategory(category.slug); setCatalogPage(1); }} className="flex items-center justify-between rounded-2xl border border-neutral-200 bg-white p-3 text-left text-sm hover:border-neutral-400 hover:bg-neutral-50">
+                    <span>{category.label}</span>
+                    <span className="text-neutral-500">{category.productCount ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="Cảnh báo tồn kho thấp">
+              <div className="grid gap-2 md:grid-cols-3">
+                {lowStock.map((item) => (
+                  <div key={item.variant_id} className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm">
+                    <b>{item.sku}</b>
+                    <div>{item.color} / {item.size}</div>
+                    <div>Tồn: {item.stock_quantity}</div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
           </div>
-        </Panel>
+        )}
       </div>
 
       {stockModal && (
@@ -454,6 +661,15 @@ function StaffPortalContent() {
             setShipmentError("");
           }}
           onSubmit={submitShipmentForm}
+        />
+      )}
+
+      {isHistoryOpen && (
+        <AdminAuditHistoryModal
+          title={historyTitle}
+          items={historyItems}
+          isLoading={isHistoryLoading}
+          onClose={() => setIsHistoryOpen(false)}
         />
       )}
     </main>
@@ -660,7 +876,7 @@ function StockModal({
               />
             </label>
 
-            {error && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+            {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
             <div className="flex justify-end gap-2">
               <button type="button" className="rounded-md border px-4 py-2" onClick={onClose} disabled={isSaving}>
@@ -770,7 +986,7 @@ function ShipmentModal({
             />
           </label>
 
-          {error && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+          {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
           <div className="flex justify-end gap-2">
             <button type="button" className="rounded-md border px-4 py-2" onClick={onClose} disabled={isSaving}>
@@ -788,6 +1004,36 @@ function ShipmentModal({
 
 function getVariantProductName(variant: StockVariantOption) {
   return variant.product_name || variant.product?.name || "Sản phẩm";
+}
+
+function flattenCategories(categories: CategoryNode[]): Array<{
+  slug: string;
+  label: string;
+  productCount?: number;
+}> {
+  const uniqueCategories = new Map<string, {
+    slug: string;
+    label: string;
+    productCount?: number;
+  }>();
+
+  const visit = (nodes: CategoryNode[]) => {
+    for (const category of nodes) {
+      const label = category.name.trim();
+      const key = label.toLocaleLowerCase("vi");
+      if (label && !uniqueCategories.has(key)) {
+        uniqueCategories.set(key, {
+          slug: category.slug,
+          label,
+          productCount: category.productCount,
+        });
+      }
+      visit(category.children ?? []);
+    }
+  };
+
+  visit(categories);
+  return [...uniqueCategories.values()];
 }
 
 function getUniqueProductOptions(variants: StockVariantOption[]) {
@@ -813,21 +1059,21 @@ function OrderDetailPanel({ order, onClose }: { order: StaffOrder; onClose: () =
   const address = order.shipping_address ?? {};
 
   return (
-    <section className="rounded-lg border bg-white p-4">
+    <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="font-semibold">Chi tiết đơn #{order.order_id}</h2>
         <button className="rounded border px-3 py-1 text-sm" onClick={onClose}>Đóng</button>
       </div>
 
       <div className="mb-4 grid gap-4 md:grid-cols-2">
-        <div className="rounded border p-3 text-sm">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm">
           <div className="font-medium">Khách hàng mua</div>
           <div className="mt-2">Tên: {customer.full_name || address.receiver_name || "Chưa có"}</div>
           <div>Email: {customer.email || "Chưa có"}</div>
           <div>Số điện thoại: {customer.phone || address.receiver_phone || "Chưa có"}</div>
           <div>Mã khách: {customer.customer_code || "Chưa có"}</div>
         </div>
-        <div className="rounded border p-3 text-sm">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm">
           <div className="font-medium">Thông tin giao hàng</div>
           <div className="mt-2">Người nhận: {address.receiver_name || "Chưa có"}</div>
           <div>Số điện thoại nhận: {address.receiver_phone || "Chưa có"}</div>
@@ -862,3 +1108,6 @@ function OrderDetailPanel({ order, onClose }: { order: StaffOrder; onClose: () =
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return <section className="space-y-2 rounded-lg border bg-white p-4"><h2 className="mb-3 font-semibold">{title}</h2>{children}</section>;
 }
+
+
+

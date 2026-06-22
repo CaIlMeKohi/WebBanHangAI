@@ -28,21 +28,21 @@ class DjangoOrmOrderRepository:
     def list_customer_orders(self, customer):
         return (
             Order.objects.filter(user=customer)
-            .prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants')
+            .prefetch_related('items', 'items__reviews', 'items__product', 'items__product__images', 'items__product__variants')
             .order_by('-created_at')
         )
 
     def get_customer_order(self, customer, order_id: int):
         return (
             Order.objects.filter(order_id=order_id, user=customer)
-            .prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants')
+            .prefetch_related('items', 'items__reviews', 'items__product', 'items__product__images', 'items__product__variants')
             .first()
         )
 
     def get_customer_order_detail(self, customer, order_id: int):
         return (
             Order.objects.filter(order_id=order_id, user=customer)
-            .prefetch_related('items', 'status_histories')
+            .prefetch_related('items', 'items__reviews', 'status_histories')
             .first()
         )
 
@@ -58,7 +58,7 @@ class DjangoOrmOrderRepository:
                 'completed',
                 'cancelled',
             ])
-            .prefetch_related('items', 'items__product')
+            .prefetch_related('items', 'items__reviews', 'items__product')
             .order_by('-created_at')
         )
         return _apply_order_filters(queryset, filters)[:200]
@@ -66,7 +66,7 @@ class DjangoOrmOrderRepository:
     def list_admin_orders(self, filters: dict):
         queryset = (
             Order.objects.select_related('user', 'user__user', 'address')
-            .prefetch_related('items', 'items__product', 'status_histories')
+            .prefetch_related('items', 'items__reviews', 'items__product', 'status_histories')
             .order_by('-created_at')
         )
         return _apply_order_filters(queryset, filters)[:200]
@@ -74,7 +74,7 @@ class DjangoOrmOrderRepository:
     def get_admin_order_detail(self, order_id: int):
         return (
             Order.objects.filter(order_id=order_id)
-            .prefetch_related('items', 'items__product', 'status_histories')
+            .prefetch_related('items', 'items__reviews', 'items__product', 'status_histories')
             .first()
         )
 

@@ -315,6 +315,14 @@ class StaffOrderStatusAPIView(APIView):
         order = Order.objects.filter(order_id=order_id).first()
         if order is None:
             return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        shipment_before = Shipment.objects.filter(order_id=order_id).first()
+        old_value = {
+            'status': order.status,
+            'payment_status': order.payment_status,
+            'carrier_name': shipment_before.carrier_name if shipment_before else '',
+            'tracking_code': shipment_before.tracking_code if shipment_before else '',
+            'shipment_status': shipment_before.shipment_status if shipment_before else '',
+        }
         next_status = request.data.get('status', 'confirmed')
         if next_status not in self.transitions.get(order.status, set()):
             return Response({'detail': 'Chuyen trang thai khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
@@ -342,6 +350,22 @@ class StaffOrderStatusAPIView(APIView):
         except DatabaseError:
             return Response({'detail': 'Không thể cập nhật trạng thái đơn hàng'}, status=status.HTTP_400_BAD_REQUEST)
         order = Order.objects.filter(order_id=order_id).prefetch_related('items', 'items__product', 'status_histories').first()
+        shipment_after = Shipment.objects.filter(order_id=order_id).first()
+        audit(
+            request,
+            'update_order_status',
+            'order',
+            order.order_id,
+            {
+                'status': order.status,
+                'payment_status': order.payment_status,
+                'carrier_name': shipment_after.carrier_name if shipment_after else '',
+                'tracking_code': shipment_after.tracking_code if shipment_after else '',
+                'shipment_status': shipment_after.shipment_status if shipment_after else '',
+                'note': note,
+            },
+            old_value=old_value,
+        )
         notify(order.user.user, 'Cap nhat don hang', f'Don #{order.order_id} da chuyen sang {next_status}', 'order')
         send_order_status_email(order.user.user.email, order.order_id, next_status)
         return Response(OrderDetailSerializer(order).data)
@@ -418,12 +442,14 @@ class AdminStaffCreateAPIView(CleanAdminStaffCreateAPIView):
 
 
 class AdminAuditLogAPIView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [IsStaff]
 
     def get(self, request):
         entity_type = request.query_params.get('entity_type')
         actions = request.query_params.getlist('action')
         queryset = AuditLog.objects.select_related('actor').order_by('-created_at')
+        if getattr(request.user, 'role', '') == 'staff':
+            queryset = queryset.filter(actor__role='staff')
         if entity_type:
             queryset = queryset.filter(entity_type=entity_type)
         if actions:

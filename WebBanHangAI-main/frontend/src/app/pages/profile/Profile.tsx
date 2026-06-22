@@ -301,6 +301,11 @@ export function Profile() {
             })),
           })),
         );
+        setReviewedOrderItems(
+          apiOrders.flatMap((order) =>
+            order.items.filter((item) => item.has_review).map((item) => item.order_item_id),
+          ),
+        );
         setCartItems(
           apiCart.map((item) => ({
             ...item.product,
@@ -557,7 +562,7 @@ export function Profile() {
         images: reviewImages,
       });
       setReviewedOrderItems((current) => [...current, reviewTarget.item.order_item_id]);
-      setReviewMessage("Đã gửi đánh giá. Đánh giá sẽ hiển thị sau khi nhân viên duyệt.");
+      setReviewMessage("Gửi đánh giá thành công.");
       setReviewTarget(null);
       setReviewComment("");
       setReviewImages([]);
@@ -909,17 +914,27 @@ export function Profile() {
                                     <div className="mt-2 text-xs text-neutral-700 dark:text-neutral-300">
                                       Đơn giá: {item.orderPrice.toLocaleString("vi-VN")} VND · Thành tiền: {(item.orderPrice * item.quantity).toLocaleString("vi-VN")} VND
                                     </div>
-                                    {order.statusRaw === "completed" && !reviewedOrderItems.includes(order.items[idx]?.order_item_id) && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setReviewTarget({ order, item: order.items[idx] });
-                                          setReviewMessage("");
-                                        }}
-                                        className="mt-3 rounded border border-neutral-300 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-                                      >
-                                        Gửi đánh giá
-                                      </button>
+                                    {order.statusRaw === "completed" && (
+                                      reviewedOrderItems.includes(order.items[idx]?.order_item_id) ? (
+                                        <button
+                                          type="button"
+                                          disabled
+                                          className="mt-3 cursor-not-allowed rounded border border-neutral-200 bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800"
+                                        >
+                                          Đã đánh giá
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setReviewTarget({ order, item: order.items[idx] });
+                                            setReviewMessage("");
+                                          }}
+                                          className="mt-3 rounded border border-neutral-300 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                                        >
+                                          Gửi đánh giá
+                                        </button>
+                                      )
                                     )}
                                   </div>
                                 </div>

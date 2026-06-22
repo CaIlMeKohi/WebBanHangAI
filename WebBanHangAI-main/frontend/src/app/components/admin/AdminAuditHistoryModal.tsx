@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+﻿import { X } from "lucide-react";
 
 import type { AdminProductHistoryItem } from "../../lib/api";
 
@@ -13,6 +13,9 @@ const actionLabels: Record<string, string> = {
   create_product: "Thêm sản phẩm",
   update_product: "Sửa sản phẩm",
   delete_product: "Xóa sản phẩm",
+  import_stock: "Nhập kho sản phẩm",
+  adjust_stock: "Điều chỉnh kho sản phẩm",
+  update_order_status: "Cập nhật đơn hàng",
   create_staff: "Thêm tài khoản",
   update_user: "Sửa tài khoản",
   delete_user: "Xóa tài khoản",
@@ -27,6 +30,9 @@ const actionResultLabels: Record<string, string> = {
   create_product: "Đã thêm thành công",
   update_product: "Đã sửa thành công",
   delete_product: "Đã xóa thành công",
+  import_stock: "Đã nhập kho thành công",
+  adjust_stock: "Đã điều chỉnh kho thành công",
+  update_order_status: "Đã cập nhật đơn hàng thành công",
   create_staff: "Đã thêm thành công",
   update_user: "Đã sửa thành công",
   delete_user: "Đã xóa thành công",
@@ -82,8 +88,8 @@ export function AdminAuditHistoryModal({
                     </div>
                   </div>
                   <div className="mt-1 text-xs text-neutral-500">
-                    Người thao tác: {item.actor_email || "Không rõ"} · Đối
-                    tượng: {item.entity_type || "-"} #{item.entity_id || "-"}
+                    Người thao tác: {item.actor_email || "Không rõ"} · Đối tượng:{" "}
+                    {item.entity_type || "-"} #{item.entity_id || "-"}
                   </div>
                   <div className="mt-3 space-y-3">
                     <ActionResult item={item} />
@@ -91,6 +97,12 @@ export function AdminAuditHistoryModal({
                       <HistoryJsonBlock
                         title="Trước thao tác"
                         value={item.old_value}
+                      />
+                    )}
+                    {item.metadata && Object.keys(item.metadata).length > 0 && (
+                      <HistoryJsonBlock
+                        title="Sau thao tác"
+                        value={item.metadata}
                       />
                     )}
                   </div>
@@ -147,3 +159,4 @@ function HistoryJsonBlock({
     </div>
   );
 }
+
