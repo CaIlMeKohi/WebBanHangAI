@@ -68,3 +68,7 @@ export async function createOrder(
 export async function confirmOrderReceived(orderId: number): Promise<ApiOrder> {
   return apiPost<ApiOrder>(`/products/orders/${orderId}/confirm-received/`, {});
 }
+
+export async function cancelCustomerOrder(orderId: number, reason: string): Promise<ApiOrder> {
+  return apiPost<ApiOrder>(`/products/orders/${orderId}/cancel/`, { reason });
+}

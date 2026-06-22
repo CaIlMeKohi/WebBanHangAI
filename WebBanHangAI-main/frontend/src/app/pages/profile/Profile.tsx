@@ -14,6 +14,7 @@ import {
 import type { Product } from "../../data/products";
 import {
   addCartItem,
+  cancelCustomerOrder,
   confirmOrderReceived,
   createProductReview,
   createAddress,
@@ -124,6 +125,10 @@ export function Profile() {
   });
   const [selectedOrder, setSelectedOrder] = useState<MockOrder | null>(null);
   const [orderMessage, setOrderMessage] = useState("");
+  const [cancelOrderTarget, setCancelOrderTarget] = useState<MockOrder | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelOrderError, setCancelOrderError] = useState("");
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
   const [repurchaseNotice, setRepurchaseNotice] = useState("");
   const [repurchasingOrderId, setRepurchasingOrderId] = useState<number | null>(null);
   const [reviewTarget, setReviewTarget] = useState<{ order: MockOrder; item: MockOrderItem } | null>(null);
@@ -501,6 +506,41 @@ export function Profile() {
       setOrderMessage("Đã xác nhận nhận hàng. Đơn hàng đã hoàn thành, bạn có thể gửi đánh giá sản phẩm.");
     } catch (error) {
       setOrderMessage(error instanceof Error ? error.message : "Không thể xác nhận nhận hàng.");
+    }
+  }
+
+  async function submitOrderCancellation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!cancelOrderTarget) return;
+    const reason = cancelReason.trim();
+    if (!reason) {
+      setCancelOrderError("Vui lòng nhập lý do hủy đơn.");
+      return;
+    }
+
+    setIsCancellingOrder(true);
+    setCancelOrderError("");
+    try {
+      const updatedOrder = await cancelCustomerOrder(cancelOrderTarget.orderId, reason);
+      setMockOrders((current) =>
+        current.map((item) =>
+          item.orderId === cancelOrderTarget.orderId
+            ? { ...item, status: getOrderStatusLabel(updatedOrder.status), statusRaw: updatedOrder.status }
+            : item,
+        ),
+      );
+      setSelectedOrder((current) =>
+        current?.orderId === cancelOrderTarget.orderId
+          ? { ...current, status: getOrderStatusLabel(updatedOrder.status), statusRaw: updatedOrder.status }
+          : current,
+      );
+      setCancelOrderTarget(null);
+      setCancelReason("");
+      setOrderMessage("Đã hủy đơn hàng thành công.");
+    } catch (error) {
+      setCancelOrderError(error instanceof Error ? error.message : "Không thể hủy đơn hàng.");
+    } finally {
+      setIsCancellingOrder(false);
     }
   }
 
@@ -913,6 +953,19 @@ export function Profile() {
                                 Xác nhận đã nhận hàng
                               </button>
                             )}
+                            {["pending", "confirmed", "processing"].includes(order.statusRaw) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCancelOrderTarget(order);
+                                  setCancelReason("");
+                                  setCancelOrderError("");
+                                }}
+                                className="flex-1 rounded border border-red-300 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/30"
+                              >
+                                Hủy đơn
+                              </button>
+                            )}
                             {order.statusRaw === "completed" && (
                               <button
                                 type="button"
@@ -1120,6 +1173,55 @@ export function Profile() {
               />
             )}
 
+            {cancelOrderTarget && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                <form
+                  onSubmit={submitOrderCancellation}
+                  className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-neutral-900"
+                >
+                  <h3 className="text-xl font-medium">Hủy đơn hàng #{cancelOrderTarget.id}</h3>
+                  <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+                    Vui lòng cho chúng tôi biết lý do bạn muốn hủy đơn hàng này.
+                  </p>
+                  <label className="mt-5 block text-sm font-medium">
+                    Lý do hủy đơn
+                    <textarea
+                      value={cancelReason}
+                      onChange={(event) => setCancelReason(event.target.value)}
+                      rows={4}
+                      maxLength={500}
+                      required
+                      autoFocus
+                      placeholder="Nhập lý do hủy đơn..."
+                      className="mt-2 w-full resize-none rounded border border-neutral-300 px-3 py-2 outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:focus:border-white"
+                    />
+                  </label>
+                  {cancelOrderError && (
+                    <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
+                      {cancelOrderError}
+                    </div>
+                  )}
+                  <div className="mt-5 flex justify-end gap-3">
+                    <button
+                      type="button"
+                      disabled={isCancellingOrder}
+                      onClick={() => setCancelOrderTarget(null)}
+                      className="rounded border px-4 py-2 text-sm disabled:opacity-50"
+                    >
+                      Không hủy
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isCancellingOrder || !cancelReason.trim()}
+                      className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {isCancellingOrder ? "Đang hủy..." : "Xác nhận hủy đơn"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
             {reviewTarget && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <form
@@ -1217,7 +1319,7 @@ function getOrderStatusLabel(status: string) {
     shipped: "Đang giao",
     delivered: "Đã giao hàng",
     completed: "Hoàn thành",
-    cancelled: "Hủy đơn",
+    cancelled: "Đã hủy",
   };
   return labels[status] ?? status;
 }
