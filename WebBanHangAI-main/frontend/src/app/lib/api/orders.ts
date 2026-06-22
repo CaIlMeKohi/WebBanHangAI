@@ -1,6 +1,23 @@
 import type { Product } from "../../data/products";
 import { apiGet, apiPost } from "../apiClient";
 
+export interface ApiShipment {
+  shipment_id: number;
+  carrier_name: string;
+  tracking_code: string;
+  shipment_status: string;
+  shipped_at?: string | null;
+  delivered_at?: string | null;
+}
+
+export interface ApiOrderStatusHistory {
+  history_id: number;
+  from_status: string;
+  to_status: string;
+  note: string;
+  created_at: string;
+}
+
 export interface ApiOrder {
   order_id: number;
   customer?: {
@@ -26,6 +43,8 @@ export interface ApiOrder {
   payment_status: string;
   payment_method: string;
   created_at: string;
+  shipment?: ApiShipment | null;
+  status_histories?: ApiOrderStatusHistory[];
   items: Array<{
     order_item_id: number;
     product: Product;
@@ -43,7 +62,8 @@ export interface ApiOrder {
 }
 
 export async function fetchOrders(userId: number): Promise<ApiOrder[]> {
-  return apiGet<ApiOrder[]>(`/products/orders/?user_id=${userId}`);
+  void userId;
+  return apiGet<ApiOrder[]>(`/products/orders/`);
 }
 
 export async function createOrder(
@@ -55,6 +75,7 @@ export async function createOrder(
     receiver_name?: string;
     receiver_phone?: string;
     coupon_code?: string;
+    checkout_token?: string;
   },
 ): Promise<ApiOrder> {
   return apiPost<ApiOrder>(`/products/orders/`, {
@@ -71,4 +92,37 @@ export async function confirmOrderReceived(orderId: number): Promise<ApiOrder> {
 
 export async function cancelCustomerOrder(orderId: number, reason: string): Promise<ApiOrder> {
   return apiPost<ApiOrder>(`/products/orders/${orderId}/cancel/`, { reason });
+}
+
+export interface ApiReturnRequest {
+  return_id: number;
+  order: number;
+  order_item: number;
+  reason: string;
+  desired_solution: string;
+  status: string;
+  reject_reason?: string;
+  created_at: string;
+  images?: Array<{ image_id: number; image_url: string }>;
+  status_histories?: Array<{
+    history_id: number;
+    from_status: string;
+    to_status: string;
+    note: string;
+    created_at: string;
+  }>;
+}
+
+export async function fetchReturnRequests(): Promise<ApiReturnRequest[]> {
+  return apiGet<ApiReturnRequest[]>(`/returns/my`);
+}
+
+export async function createReturnRequest(data: {
+  order_id: number;
+  order_item_id: number;
+  reason: string;
+  desired_solution: string;
+  images: string[];
+}): Promise<ApiReturnRequest> {
+  return apiPost<ApiReturnRequest>(`/returns/`, data);
 }

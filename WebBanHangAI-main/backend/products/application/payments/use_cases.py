@@ -21,5 +21,6 @@ class HandlePaymentCallbackUseCase:
             'order_id': dto.order_id,
             'success': dto.success,
             'transaction_id': dto.transaction_id,
+            'amount': dto.amount,
             'raw_payload': dto.raw_payload or {},
         })

@@ -9,10 +9,12 @@ from rest_framework.views import APIView
 
 from products.services.email_service import send_order_status_email
 from products.infrastructure.stored_procedures import (
-    cancel_order_and_restore_stock,
     low_stock_variants,
-    refund_order,
     update_order_status,
+)
+from products.services.order_lifecycle import (
+    cancel_order_with_stock_restore,
+    complete_manual_refund,
 )
 from products.interfaces.api.order_views import (
     AdminOrderDetailAPIView as CleanAdminOrderDetailAPIView,
@@ -83,6 +85,7 @@ from products.models import (
     Order,
     OrderItem,
     OrderStatusHistory,
+    Payment,
     ProductVariant,
     ReturnRequest,
     ReturnRequestImage,
@@ -90,12 +93,20 @@ from products.models import (
     Review,
     SearchLog,
     Shipment,
+    StockMovement,
     StaffProfile,
     StoreUser,
     UserInteraction,
     UserSession,
 )
-from products.security.permissions import IsAdmin, IsCustomer, IsStaff, IsStoreAuthenticated
+from products.security.permissions import (
+    CanHandleReturns,
+    CanModerateReviews,
+    CanProcessOrders,
+    IsAdmin,
+    IsCustomer,
+    IsStoreAuthenticated,
+)
 from products.serializers import OrderSerializer, ProductSerializer, RegisterSerializer, StoreUserSerializer
 
 
@@ -222,7 +233,7 @@ class StaffOrderListAPIView(CleanStaffOrderListAPIView):
 
 
 class StaffReturnStatusAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanHandleReturns]
 
     @transaction.atomic
     def put(self, request, return_id):
@@ -232,6 +243,15 @@ class StaffReturnStatusAPIView(APIView):
         next_status = request.data.get('status')
         if next_status not in {'approved', 'rejected', 'completed'}:
             return Response({'detail': 'Trang thai khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
+        allowed_transitions = {
+            'pending': {'approved', 'rejected'},
+            'approved': {'completed', 'rejected'},
+        }
+        if next_status not in allowed_transitions.get(item.status, set()):
+            return Response(
+                {'detail': 'Chuyển trạng thái đổi trả không hợp lệ'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if next_status == 'rejected' and not request.data.get('reason'):
             return Response({'detail': 'Tu choi phai ghi ly do'}, status=status.HTTP_400_BAD_REQUEST)
         old = item.status
@@ -242,22 +262,46 @@ class StaffReturnStatusAPIView(APIView):
         item.save(update_fields=['status', 'reject_reason', 'processed_by', 'processed_at'])
         ReturnStatusHistory.objects.create(return_request=item, from_status=old, to_status=next_status, changed_by=request.user)
         if next_status == 'completed':
-            try:
-                refund_order(
-                    item.order_id,
-                    request.user.user_id,
-                    request.data.get('reason') or f'Return request #{item.return_id} completed',
-                    restore_stock=True,
-                )
-            except DatabaseError:
+            order_item = (
+                OrderItem.objects.select_related('variant')
+                .select_for_update()
+                .filter(order_item_id=item.order_item_id, order_id=item.order_id)
+                .first()
+            )
+            if order_item is None:
                 transaction.set_rollback(True)
-                return Response({'detail': 'Khong the hoan tien/nhap lai kho cho yeu cau doi tra'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'detail': 'Không tìm thấy sản phẩm cần hoàn kho'}, status=status.HTTP_400_BAD_REQUEST)
+            variant = ProductVariant.objects.select_for_update().get(variant_id=order_item.variant_id)
+            quantity_before = variant.stock_quantity
+            variant.stock_quantity += order_item.quantity
+            variant.save(update_fields=['stock_quantity', 'updated_at'])
+            StockMovement.objects.create(
+                variant=variant,
+                order=item.order,
+                staff=staff_for(request.user),
+                action_type='return_in',
+                quantity_before=quantity_before,
+                change_quantity=order_item.quantity,
+                quantity_after=variant.stock_quantity,
+                reason=request.data.get('reason') or f'Hoàn kho yêu cầu đổi trả #{item.return_id}',
+                note=f'Order item #{order_item.order_item_id}',
+            )
+            if item.desired_solution == 'refund' and item.order.payment_status == 'paid':
+                item.order.payment_status = 'refund_pending'
+                item.order.save(update_fields=['payment_status', 'updated_at'])
+                Payment.objects.filter(order=item.order, status='success').update(status='refund_pending')
+                notify(
+                    item.user.user,
+                    'Đang chờ hoàn tiền',
+                    f'Yêu cầu đổi trả #{item.return_id} đã hoàn tất và đang chờ admin xác nhận hoàn tiền.',
+                    'payment',
+                )
         notify(item.user.user, 'Cap nhat yeu cau doi tra', f'Yeu cau #{item.return_id} da chuyen sang {next_status}', 'return')
         return Response(ReturnRequestSerializer(item).data)
 
 
 class StaffReviewModerateAPIView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [CanModerateReviews]
 
     def put(self, request, review_id):
         review = Review.objects.filter(review_id=review_id).first()
@@ -269,7 +313,7 @@ class StaffReviewModerateAPIView(APIView):
         reason = str(request.data.get('reason', '')).strip()
         if action == 'hide' and not reason:
             return Response({'detail': 'An danh gia bat buoc ghi ly do'}, status=status.HTTP_400_BAD_REQUEST)
-        review.status = 'visible' if action == 'approve' else 'hidden'
+        review.status = 'approved' if action == 'approve' else 'hidden'
         review.hidden_reason = reason if action == 'hide' else ''
         review.moderated_by_staff = staff_for(request.user)
         review.save(update_fields=['status', 'hidden_reason', 'moderated_by_staff', 'updated_at'])
@@ -286,12 +330,17 @@ class AdminReviewDeleteAPIView(CleanAdminReviewDeleteAPIView):
 
 
 class StaffOrderConfirmAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanProcessOrders]
 
     def put(self, request, order_id):
         order = Order.objects.select_related('address').prefetch_related('items__variant').filter(order_id=order_id, status='pending').first()
         if order is None:
             return Response({'detail': 'Chi xac nhan don pending ton tai'}, status=status.HTTP_400_BAD_REQUEST)
+        if order.payment_method != 'cod' and order.payment_status != 'paid':
+            return Response(
+                {'detail': 'Đơn thanh toán online chưa được thanh toán'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not order.receiver_phone_snapshot or not order.address_line_snapshot:
             return Response({'detail': 'Don hang thieu dia chi hoac so dien thoai giao hang'}, status=status.HTTP_400_BAD_REQUEST)
         for item in order.items.all():
@@ -301,7 +350,7 @@ class StaffOrderConfirmAPIView(APIView):
 
 
 class StaffOrderStatusAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanProcessOrders]
     transitions = {
         'pending': {'confirmed', 'cancelled'},
         'confirmed': {'processing', 'cancelled'},
@@ -318,6 +367,11 @@ class StaffOrderStatusAPIView(APIView):
         next_status = request.data.get('status', 'confirmed')
         if next_status not in self.transitions.get(order.status, set()):
             return Response({'detail': 'Chuyen trang thai khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
+        if next_status != 'cancelled' and order.payment_method != 'cod' and order.payment_status != 'paid':
+            return Response(
+                {'detail': 'Đơn thanh toán online chưa được thanh toán'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         carrier = None
         tracking_code = str(request.data.get('tracking_code', '')).strip()
         if next_status == 'waiting_pickup':
@@ -329,7 +383,11 @@ class StaffOrderStatusAPIView(APIView):
         note = str(request.data.get('note', '')).strip()
         try:
             if next_status == 'cancelled':
-                cancel_order_and_restore_stock(order.order_id, request.user.user_id if request.user else None, note or 'Staff cancelled order')
+                order = cancel_order_with_stock_restore(
+                    order,
+                    actor=request.user,
+                    reason=note or 'Staff cancelled order',
+                )
             else:
                 update_order_status(
                     order.order_id,
@@ -364,6 +422,31 @@ class AdminOrderStatusAPIView(StaffOrderStatusAPIView):
         if order.status == 'delivered' and not order.return_requests.exists():
             return Response({'detail': 'Admin chi can thiep don delivered khi co khieu nai/doi tra'}, status=status.HTTP_400_BAD_REQUEST)
         return super().put(request, order_id)
+
+
+class AdminOrderRefundCompleteAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def post(self, request, order_id):
+        order = Order.objects.filter(order_id=order_id).first()
+        if order is None:
+            return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            order = complete_manual_refund(
+                order,
+                request.user,
+                request.data.get('refund_reference'),
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        audit(
+            request,
+            'complete_manual_refund',
+            'order',
+            order.order_id,
+            {'refund_reference': request.data.get('refund_reference')},
+        )
+        return Response(OrderDetailSerializer(order).data)
 
 
 class AdminUserViewSet(CleanAdminUserViewSet):

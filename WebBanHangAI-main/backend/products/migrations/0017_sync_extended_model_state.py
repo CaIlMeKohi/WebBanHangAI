@@ -9,7 +9,27 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[],
+            database_operations=[
+                migrations.RunSQL(
+                    sql=r"""
+IF COL_LENGTH('dbo.product_variants', 'color') IS NULL
+    ALTER TABLE dbo.product_variants ADD color NVARCHAR(100) NOT NULL CONSTRAINT DF_product_variants_color DEFAULT N'';
+IF COL_LENGTH('dbo.product_variants', 'size') IS NULL
+    ALTER TABLE dbo.product_variants ADD size NVARCHAR(50) NOT NULL CONSTRAINT DF_product_variants_size DEFAULT N'';
+IF COL_LENGTH('dbo.product_variants', 'stock_reserved') IS NULL
+    ALTER TABLE dbo.product_variants ADD stock_reserved INT NOT NULL CONSTRAINT DF_product_variants_stock_reserved DEFAULT 0;
+IF COL_LENGTH('dbo.product_variants', 'low_stock_threshold') IS NULL
+    ALTER TABLE dbo.product_variants ADD low_stock_threshold INT NOT NULL CONSTRAINT DF_product_variants_low_stock DEFAULT 0;
+IF COL_LENGTH('dbo.product_variants', 'is_active') IS NULL
+    ALTER TABLE dbo.product_variants ADD is_active BIT NOT NULL CONSTRAINT DF_product_variants_active DEFAULT 1;
+IF COL_LENGTH('dbo.product_variants', 'created_at') IS NULL
+    ALTER TABLE dbo.product_variants ADD created_at DATETIME2 NOT NULL CONSTRAINT DF_product_variants_created DEFAULT SYSUTCDATETIME();
+IF COL_LENGTH('dbo.product_variants', 'updated_at') IS NULL
+    ALTER TABLE dbo.product_variants ADD updated_at DATETIME2 NOT NULL CONSTRAINT DF_product_variants_updated DEFAULT SYSUTCDATETIME();
+""",
+                    reverse_sql=migrations.RunSQL.noop,
+                ),
+            ],
             state_operations=[
                 migrations.CreateModel(
                     name='Customer',

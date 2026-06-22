@@ -3,7 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import json
 import re
 
-from django.db.models import F, Q
+from django.db.models import Avg, Count, F, Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -21,6 +21,7 @@ from .models import (
     Product,
     ProductImage,
     ProductVariant,
+    Review,
     StoreUser,
     UserInteraction,
     WishlistItem,
@@ -37,8 +38,8 @@ class ProductSerializer(serializers.ModelSerializer):
     category = serializers.SerializerMethodField()
     subcategory = serializers.SerializerMethodField()
     gender = serializers.CharField(read_only=True)
-    rating = serializers.FloatField(source='average_rating')
-    reviews = serializers.IntegerField(source='review_count')
+    rating = serializers.SerializerMethodField()
+    reviews = serializers.SerializerMethodField()
     colors = serializers.SerializerMethodField()
     sizes = serializers.SerializerMethodField()
     isNew = serializers.SerializerMethodField()
@@ -51,9 +52,48 @@ class ProductSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at')
     brandName = serializers.SerializerMethodField()
     stockQuantity = serializers.SerializerMethodField()
+    variants = serializers.SerializerMethodField()
+
+    def _available_variants(self, obj: Product) -> list[ProductVariant]:
+        return [
+            variant
+            for variant in obj.variants.all()
+            if variant.is_active and variant.stock_quantity > variant.stock_reserved
+        ]
 
     def get_id(self, obj: Product) -> str:
         return str(obj.product_id)
+
+    def _get_review_stats(self, obj: Product) -> tuple[float, int]:
+        cache = getattr(self, '_review_stats_cache', None)
+        if cache is None:
+            cache = {}
+            self._review_stats_cache = cache
+        if obj.product_id in cache:
+            return cache[obj.product_id]
+
+        annotated_count = getattr(obj, 'approved_review_count', None)
+        annotated_average = getattr(obj, 'approved_average_rating', None)
+        if annotated_count is None:
+            stats = Review.objects.filter(
+                product_id=obj.product_id,
+                status='approved',
+            ).aggregate(
+                average=Avg('rating'),
+                total=Count('review_id'),
+            )
+            annotated_average = stats['average']
+            annotated_count = stats['total']
+
+        result = (float(annotated_average or 0), int(annotated_count or 0))
+        cache[obj.product_id] = result
+        return result
+
+    def get_rating(self, obj: Product) -> float:
+        return self._get_review_stats(obj)[0]
+
+    def get_reviews(self, obj: Product) -> int:
+        return self._get_review_stats(obj)[1]
 
     def get_price(self, obj: Product) -> int:
         return self._get_promotional_price(obj)[0]
@@ -147,7 +187,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_colors(self, obj: Product) -> list[str]:
         colors = []
-        for variant in obj.variants.all():
+        for variant in self._available_variants(obj):
             color = variant.color
             if color and color not in colors:
                 colors.append(color)
@@ -155,7 +195,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_sizes(self, obj: Product) -> list[str]:
         sizes = []
-        for variant in obj.variants.all():
+        for variant in self._available_variants(obj):
             size = variant.size
             if size and size not in sizes:
                 sizes.append(size)
@@ -183,7 +223,23 @@ class ProductSerializer(serializers.ModelSerializer):
         return obj.brand.name if obj.brand_id else None
 
     def get_stockQuantity(self, obj: Product) -> int:
-        return sum(max(0, variant.stock_quantity - variant.stock_reserved) for variant in obj.variants.all())
+        return sum(
+            variant.stock_quantity - variant.stock_reserved
+            for variant in self._available_variants(obj)
+        )
+
+    def get_variants(self, obj: Product) -> list[dict]:
+        return [
+            {
+                'variant_id': variant.variant_id,
+                'sku': variant.sku,
+                'color': variant.color,
+                'size': variant.size,
+                'price': int(variant.price),
+                'available_stock': variant.stock_quantity - variant.stock_reserved,
+            }
+            for variant in self._available_variants(obj)
+        ]
 
     class Meta:
         model = Product
@@ -212,6 +268,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'createdAt',
             'brandName',
             'stockQuantity',
+            'variants',
         ]
 
 
@@ -451,13 +508,7 @@ class ProductAdminSerializer(serializers.ModelSerializer):
 
 class UserProductEventSerializer(serializers.ModelSerializer):
     product_id = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), source='product')
-    user_id = serializers.IntegerField(required=False, allow_null=True)
-
-    def create(self, validated_data):
-        user_id = validated_data.pop('user_id', None)
-        if user_id is not None:
-            validated_data['user_id'] = user_id
-        return super().create(validated_data)
+    user_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = UserInteraction
@@ -475,7 +526,7 @@ class UserProductEventSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
-    id = serializers.IntegerField(source='category_id')
+    id = serializers.IntegerField(source='category_id', read_only=True)
     parentSlug = serializers.SerializerMethodField()
     productCount = serializers.SerializerMethodField()
     children = serializers.SerializerMethodField()
@@ -499,7 +550,8 @@ class CategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Category
-        fields = ['id', 'slug', 'name', 'parentSlug', 'productCount', 'children']
+        fields = ['id', 'slug', 'name', 'parentSlug', 'productCount', 'children', 'is_active']
+        read_only_fields = ['id', 'parentSlug', 'productCount', 'children']
 
 
 class StoreUserSerializer(serializers.ModelSerializer):
@@ -745,7 +797,9 @@ class OrderSerializer(serializers.ModelSerializer):
             'status',
             'payment_status',
             'payment_method',
+            'payment_expires_at',
             'created_at',
             'updated_at',
             'items',
         ]
+        read_only_fields = ['payment_expires_at']

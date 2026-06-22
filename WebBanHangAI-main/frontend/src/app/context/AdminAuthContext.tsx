@@ -3,13 +3,6 @@ import { loginUser, registerUser, type ApiUser } from "../lib/api";
 
 type AuthRole = "admin" | "staff" | "user" | null;
 
-interface RegisteredUser {
-  username: string;
-  password: string;
-  role: "user";
-  userId?: number;
-}
-
 interface StoredAuth {
   username?: string;
   role?: AuthRole;
@@ -47,14 +40,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const AUTH_CREDENTIALS = {
-  admin: { username: "admin", password: "123" as const },
-  user: { username: "user", password: "123" as const },
-};
-
 const AUTH_STORAGE_KEY = "siteAuth";
 const LEGACY_AUTH_STORAGE_KEY = "adminAuth";
-const REGISTERED_USERS_STORAGE_KEY = "siteRegisteredUsers";
 
 function readStoredAuth(): StoredAuth | null {
   for (const key of [AUTH_STORAGE_KEY, LEGACY_AUTH_STORAGE_KEY]) {
@@ -74,19 +61,6 @@ function readStoredAuth(): StoredAuth | null {
     }
   }
   return null;
-}
-
-function readRegisteredUsers(): RegisteredUser[] {
-  try {
-    const raw = localStorage.getItem(REGISTERED_USERS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as RegisteredUser[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeRegisteredUsers(users: RegisteredUser[]) {
-  localStorage.setItem(REGISTERED_USERS_STORAGE_KEY, JSON.stringify(users));
 }
 
 export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
@@ -146,24 +120,18 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     inputUsername: string,
     inputPassword: string,
   ): Promise<boolean> => {
-    try {
-      const response = await loginUser(inputUsername, inputPassword);
-      const apiUser = response.user;
-      if (!response.access) {
-        return false;
-      }
-      applyUser(
-        apiUser.username,
-        roleFromApiUser(apiUser),
-        apiUser.user_id,
-        response.access,
-      );
-      return true;
-    } catch {
-      // DB-backed auth is required for cart, wishlist, orders and recommendations.
+    const response = await loginUser(inputUsername, inputPassword);
+    const apiUser = response.user;
+    if (!response.access) {
+      throw new Error("Máy chủ không trả về phiên đăng nhập.");
     }
-
-    return false;
+    applyUser(
+      apiUser.username,
+      roleFromApiUser(apiUser),
+      apiUser.user_id,
+      response.access,
+    );
+    return true;
   };
 
   const register = async (data: {
@@ -202,23 +170,6 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    if (normalizedUsername === AUTH_CREDENTIALS.admin.username) {
-      return { success: false, error: "Tên đăng nhập này đã được sử dụng" };
-    }
-
-    if (normalizedUsername === AUTH_CREDENTIALS.user.username) {
-      return { success: false, error: "Tên đăng nhập này đã được sử dụng" };
-    }
-
-    const users = readRegisteredUsers();
-    const existingUser = users.some(
-      (user) => user.username === normalizedUsername,
-    );
-
-    if (existingUser) {
-      return { success: false, error: "Tên đăng nhập này đã được sử dụng" };
-    }
-
     try {
       const response = await registerUser({
         ...data,
@@ -237,17 +188,6 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         error: error instanceof Error ? error.message : "Đăng ký thất bại",
       };
     }
-
-    const newUser: RegisteredUser = {
-      username: normalizedUsername,
-      password: inputPassword,
-      role: "user",
-    };
-    const nextUsers = [...users, newUser];
-    writeRegisteredUsers(nextUsers);
-    applyUser(newUser.username, newUser.role, null);
-
-    return { success: true };
   };
 
   const logout = () => {

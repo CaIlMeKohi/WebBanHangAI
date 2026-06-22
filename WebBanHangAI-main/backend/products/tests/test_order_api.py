@@ -1,17 +1,22 @@
+from datetime import timedelta
 from unittest.mock import patch
 
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from products.models import CartItem, CouponUsage, Order, Payment
+from products.services.order_lifecycle import expire_pending_online_orders
 from products.tests.factories import (
     auth_headers,
+    create_admin_user,
     create_address,
     create_cart_item,
     create_coupon,
     create_customer_user,
     create_order,
     create_order_item,
+    create_payment,
     create_product,
     create_staff_user,
 )
@@ -62,20 +67,44 @@ class OrderApiTests(APITestCase):
         self.assertEqual(response.data["discount_amount"], "10000.00")
         self.assertTrue(CouponUsage.objects.filter(coupon=coupon, user=self.customer).exists())
 
+    @patch("products.infrastructure.django_orm.order_repository.send_order_confirmation", return_value={"skipped": True})
+    @patch("products.infrastructure.django_orm.order_repository.decrease_variant_stock", return_value=True)
+    @patch("products.infrastructure.django_orm.order_repository.check_variant_stock", return_value={"available_stock": 10})
+    def test_checkout_token_prevents_duplicate_order(self, _stock, _decrease, _email):
+        item = create_cart_item(self.customer, self.variant, quantity=1)
+        payload = {
+            "payment_method": "cod",
+            "cart_item_ids": [item.cart_item_id],
+            "checkout_token": "checkout-token-123",
+        }
+
+        first = self.client.post(
+            "/api/products/orders/",
+            payload,
+            format="json",
+            **auth_headers(self.user),
+        )
+        second = self.client.post(
+            "/api/products/orders/",
+            payload,
+            format="json",
+            **auth_headers(self.user),
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data["order_id"], second.data["order_id"])
+        self.assertEqual(Order.objects.filter(checkout_token="checkout-token-123").count(), 1)
+
     def test_customer_cancel_pending_order(self):
         order = create_order(customer=self.customer, address=self.address, status="pending")
 
-        def cancel_sp(order_id, actor_user_id=None, reason="", restore_stock=False):
-            Order.objects.filter(order_id=order_id).update(status="cancelled")
-            return []
-
-        with patch("products.infrastructure.django_orm.order_repository.cancel_order_and_restore_stock", side_effect=cancel_sp):
-            response = self.client.post(
-                f"/api/products/orders/{order.order_id}/cancel/",
-                {"user_id": self.user.user_id, "reason": "Changed mind"},
-                format="json",
-                **auth_headers(self.user),
-            )
+        response = self.client.post(
+            f"/api/products/orders/{order.order_id}/cancel/",
+            {"user_id": self.user.user_id, "reason": "Changed mind"},
+            format="json",
+            **auth_headers(self.user),
+        )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "cancelled")
@@ -93,6 +122,65 @@ class OrderApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("detail", response.data)
 
+    def test_cancel_paid_order_marks_refund_pending(self):
+        order = create_order(
+            customer=self.customer,
+            address=self.address,
+            status="pending",
+            payment_method="bank_transfer",
+            payment_status="paid",
+        )
+        create_order_item(order, product=self.product, variant=self.variant)
+        payment = Payment.objects.create(
+            order=order,
+            amount=order.final_amount,
+            payment_method="bank_transfer",
+            status="success",
+        )
+
+        response = self.client.post(
+            f"/api/products/orders/{order.order_id}/cancel/",
+            {"reason": "Changed mind"},
+            format="json",
+            **auth_headers(self.user),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(order.payment_status, "refund_pending")
+        self.assertEqual(payment.status, "refund_pending")
+
+    def test_expired_online_order_is_cancelled_and_stock_restored(self):
+        order = create_order(
+            customer=self.customer,
+            address=self.address,
+            status="pending",
+            payment_method="bank_transfer",
+            payment_status="pending",
+        )
+        order.payment_expires_at = timezone.now() - timedelta(minutes=1)
+        order.save(update_fields=["payment_expires_at"])
+        self.variant.stock_quantity = 9
+        self.variant.save(update_fields=["stock_quantity"])
+        create_order_item(order, product=self.product, variant=self.variant)
+        payment = Payment.objects.create(
+            order=order,
+            amount=order.final_amount,
+            payment_method="bank_transfer",
+            status="pending",
+        )
+
+        self.assertEqual(expire_pending_online_orders(), 1)
+
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.variant.refresh_from_db()
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.payment_status, "expired")
+        self.assertEqual(payment.status, "expired")
+        self.assertEqual(self.variant.stock_quantity, 10)
+
 
 class StaffOrderStatusApiTests(APITestCase):
     def setUp(self):
@@ -103,7 +191,7 @@ class StaffOrderStatusApiTests(APITestCase):
         create_order_item(self.order, product=product, variant=product.variants.first())
 
     def test_staff_confirm_order(self):
-        def update_sp(order_id, next_status, actor_user_id=None, carrier_name=None):
+        def update_sp(order_id, next_status, *args, **kwargs):
             Order.objects.filter(order_id=order_id).update(status=next_status)
             return []
 
@@ -122,7 +210,7 @@ class StaffOrderStatusApiTests(APITestCase):
         self.order.status = "confirmed"
         self.order.save(update_fields=["status"])
 
-        def update_sp(order_id, next_status, actor_user_id=None, carrier_name=None):
+        def update_sp(order_id, next_status, *args, **kwargs):
             Order.objects.filter(order_id=order_id).update(status=next_status)
             return []
 
@@ -147,3 +235,46 @@ class StaffOrderStatusApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("detail", response.data)
+
+    def test_staff_cannot_process_unpaid_online_order(self):
+        self.order.payment_method = "bank_transfer"
+        self.order.payment_status = "pending"
+        self.order.save(update_fields=["payment_method", "payment_status"])
+
+        response = self.client.put(
+            f"/api/products/staff/orders/{self.order.order_id}/status/",
+            {"status": "confirmed"},
+            format="json",
+            **auth_headers(self.staff_user),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("chua duoc thanh toan", response.data["detail"])
+
+
+class AdminRefundApiTests(APITestCase):
+    def setUp(self):
+        self.admin_user, _admin = create_admin_user()
+        _customer_user, self.customer = create_customer_user()
+        self.order = create_order(
+            customer=self.customer,
+            status="cancelled",
+            payment_method="bank_transfer",
+            payment_status="refund_pending",
+        )
+        self.payment = create_payment(self.order, status="refund_pending")
+
+    def test_admin_can_complete_manual_refund_with_reference(self):
+        response = self.client.post(
+            f"/api/admin/orders/{self.order.order_id}/refund/complete",
+            {"refund_reference": "REFUND-123"},
+            format="json",
+            **auth_headers(self.admin_user),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.payment.refresh_from_db()
+        self.assertEqual(self.order.payment_status, "refunded")
+        self.assertEqual(self.payment.status, "refunded")
+        self.assertEqual(self.payment.refund_reference, "REFUND-123")

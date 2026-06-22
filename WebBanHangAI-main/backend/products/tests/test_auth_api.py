@@ -79,7 +79,7 @@ class AuthApiTests(APITestCase):
     def test_profile_endpoint_returns_current_shape(self):
         user, _customer = create_customer_user()
 
-        response = self.client.get(f"/api/products/profile/?user_id={user.user_id}")
+        response = self.client.get("/api/products/profile/", **auth_headers(user))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         for field in ["user_id", "username", "full_name", "email", "phone", "role"]:

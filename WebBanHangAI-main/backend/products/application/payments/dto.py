@@ -19,6 +19,7 @@ class PaymentCallbackDTO:
     order_id: Any
     success: bool
     transaction_id: Any = None
+    amount: Any = None
     raw_payload: dict[str, Any] | None = None
 
     @classmethod
@@ -27,5 +28,6 @@ class PaymentCallbackDTO:
             order_id=payload.get('order_id'),
             success=str(payload.get('success', 'false')).lower() in {'true', '1', 'success'},
             transaction_id=payload.get('transaction_id'),
+            amount=payload.get('amount'),
             raw_payload=dict(payload),
         )

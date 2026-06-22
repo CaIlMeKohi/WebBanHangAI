@@ -33,6 +33,7 @@ export function Navbar() {
   const [cartCount, setCartCount] = useState(0);
   const [wishlistCount, setWishlistCount] = useState(0);
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
+  const [notificationError, setNotificationError] = useState("");
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
 
@@ -50,7 +51,8 @@ export function Navbar() {
           }
           return;
         } catch {
-          // Fall back to local cart count if API is unavailable.
+          if (isMounted) setCartCount(0);
+          return;
         }
       }
 
@@ -62,33 +64,26 @@ export function Navbar() {
     }
 
     async function loadWishlistCount() {
-      const localWishlistIds = readStoredWishlistIds();
-      if (hasStoredWishlistIds()) {
-        if (isMounted) {
-          setWishlistCount(localWishlistIds.length);
-        }
-        return;
-      }
-
       if (userId) {
         try {
           const wishlistItems = await fetchWishlist(userId);
           if (isMounted) {
             setWishlistCount(wishlistItems.length);
           }
-          if (wishlistItems.length > 0) {
-            writeStoredWishlistIds(
-              wishlistItems.map((item) => String(item.product.id)),
-            );
-          }
+          writeStoredWishlistIds(
+            wishlistItems.map((item) => String(item.product.id)),
+          );
           return;
         } catch {
-          // Fall back to local wishlist when API unavailable
+          if (isMounted) setWishlistCount(0);
+          return;
         }
       }
 
       if (isMounted) {
-        setWishlistCount(0);
+        setWishlistCount(
+          hasStoredWishlistIds() ? readStoredWishlistIds().length : 0,
+        );
       }
     }
 
@@ -99,9 +94,17 @@ export function Navbar() {
       }
       try {
         const items = await fetchNotifications();
-        if (isMounted) setNotifications(items);
-      } catch {
-        if (isMounted) setNotifications([]);
+        if (isMounted) {
+          setNotifications(items);
+          setNotificationError("");
+        }
+      } catch (error) {
+        if (isMounted) {
+          setNotifications([]);
+          setNotificationError(
+            error instanceof Error ? error.message : "Không tải được thông báo.",
+          );
+        }
       }
     }
 
@@ -414,6 +417,11 @@ export function Navbar() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-4">
+                {notificationError && (
+                  <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {notificationError}
+                  </div>
+                )}
                 {notifications.length > 0 ? (
                   <div className="space-y-3">
                     {notifications.map((notification) => (
@@ -451,11 +459,11 @@ export function Navbar() {
                       </div>
                     ))}
                   </div>
-                ) : (
+                ) : !notificationError ? (
                   <div className="flex h-full items-center justify-center text-center text-sm text-neutral-500">
                     Chưa có thông báo
                   </div>
-                )}
+                ) : null}
               </div>
             </aside>
           </div>

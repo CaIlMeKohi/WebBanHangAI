@@ -17,3 +17,11 @@ class AddWishlistItemUseCase:
 
     def execute(self, customer, product_id):
         return self.repository.add_item(customer, product_id)
+
+
+class DeleteWishlistItemUseCase:
+    def __init__(self, repository: WishlistRepository):
+        self.repository = repository
+
+    def execute(self, customer, product_id):
+        return self.repository.delete_item(customer, product_id)

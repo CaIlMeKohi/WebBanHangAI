@@ -4,7 +4,7 @@ import json
 
 from django.db import DatabaseError
 from django.http import Http404
-from rest_framework import generics
+from rest_framework import generics, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework import viewsets
@@ -144,7 +144,7 @@ class AdminCategoryViewSet(viewsets.ModelViewSet):
         category = self.get_object()
         category, action = DeleteCategoryUseCase(_catalog_repository()).execute(category)
         if action == 'deactivated':
-            return Response(self.get_serializer(category).data)
+            return Response(status=status.HTTP_204_NO_CONTENT)
         return super().destroy(request, *args, **kwargs)
 
 

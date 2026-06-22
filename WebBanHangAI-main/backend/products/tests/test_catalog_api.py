@@ -1,7 +1,13 @@
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from products.tests.factories import create_brand, create_category, create_product
+from products.models import Review
+from products.tests.factories import (
+    create_brand,
+    create_category,
+    create_customer_user,
+    create_product,
+)
 
 
 def results(data):
@@ -66,3 +72,33 @@ class CatalogApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertGreaterEqual(len(results(response.data)), 2)
+
+    def test_rating_uses_approved_reviews_instead_of_imported_product_stats(self):
+        self.men_product.average_rating = 4
+        self.men_product.review_count = 49
+        self.men_product.save(update_fields=["average_rating", "review_count"])
+        _, customer = create_customer_user()
+        Review.objects.create(
+            product=self.men_product,
+            user=customer,
+            rating=5,
+            comment="San pham dep",
+            status="approved",
+        )
+
+        response = self.client.get(f"/api/products/{self.men_product.product_id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["rating"], 5.0)
+        self.assertEqual(response.data["reviews"], 1)
+
+    def test_rating_filter_ignores_fake_imported_rating(self):
+        self.men_product.average_rating = 5
+        self.men_product.review_count = 49
+        self.men_product.save(update_fields=["average_rating", "review_count"])
+
+        response = self.client.get("/api/products/", {"rating": "4"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ids = {item["id"] for item in results(response.data)}
+        self.assertNotIn(str(self.men_product.product_id), ids)

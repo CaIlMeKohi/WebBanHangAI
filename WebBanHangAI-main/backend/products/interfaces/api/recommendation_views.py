@@ -32,8 +32,16 @@ class ForYouRecommendationsAPIView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
+        query = ForYouQueryDTO.from_query_params(request.query_params)
+        authenticated_user_id = getattr(getattr(request, 'user', None), 'user_id', None)
+        query = ForYouQueryDTO(
+            user_id=str(authenticated_user_id) if authenticated_user_id else None,
+            session_id=query.session_id if not authenticated_user_id else None,
+            search=query.search,
+            limit=query.limit,
+        )
         products = GetForYouRecommendationsUseCase(_recommendation_repository()).execute(
-            ForYouQueryDTO.from_query_params(request.query_params),
+            query,
         )
         serializer = ProductSerializer(products, many=True, context={'request': request})
         return Response({'results': serializer.data, 'count': len(serializer.data)}, status=status.HTTP_200_OK)

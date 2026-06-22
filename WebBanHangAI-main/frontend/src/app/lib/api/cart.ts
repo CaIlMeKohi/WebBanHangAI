@@ -47,12 +47,14 @@ export interface ApiCoupon {
 }
 
 export async function fetchCart(userId: number): Promise<ApiCartItem[]> {
-  return apiGet<ApiCartItem[]>(`/products/cart/?user_id=${userId}`);
+  void userId;
+  return apiGet<ApiCartItem[]>(`/products/cart/`);
 }
 
 export async function addCartItem(data: {
   user_id: number;
   product_id: number | string;
+  variant_id?: number;
   quantity?: number;
   size?: string;
   color?: string;
@@ -65,8 +67,8 @@ export async function updateCartItem(
   itemId: number,
   quantity: number,
 ): Promise<ApiCartItem> {
+  void userId;
   return apiPut<ApiCartItem>(`/products/cart/${itemId}/`, {
-    user_id: userId,
     quantity,
   });
 }
@@ -75,19 +77,21 @@ export async function deleteCartItem(
   userId: number,
   itemId: number,
 ): Promise<void> {
-  return apiDelete(`/products/cart/${itemId}/?user_id=${userId}`);
+  void userId;
+  return apiDelete(`/products/cart/${itemId}/`);
 }
 
 export async function fetchAddresses(userId: number): Promise<ApiAddress[]> {
-  return apiGet<ApiAddress[]>(`/products/addresses/?user_id=${userId}`);
+  void userId;
+  return apiGet<ApiAddress[]>(`/products/addresses/`);
 }
 
 export async function createAddress(
   userId: number,
   data: AddressPayload,
 ): Promise<ApiAddress> {
+  void userId;
   return apiPost<ApiAddress>(`/products/addresses/`, {
-    user_id: userId,
     ...data,
   });
 }
@@ -97,8 +101,8 @@ export async function updateAddress(
   addressId: number,
   data: Partial<AddressPayload>,
 ): Promise<ApiAddress> {
+  void userId;
   return apiPut<ApiAddress>(`/products/addresses/${addressId}/`, {
-    user_id: userId,
     ...data,
   });
 }
@@ -107,7 +111,8 @@ export async function deleteAddress(
   userId: number,
   addressId: number,
 ): Promise<void> {
-  return apiDelete(`/products/addresses/${addressId}/?user_id=${userId}`);
+  void userId;
+  return apiDelete(`/products/addresses/${addressId}/`);
 }
 
 export async function applyCouponToCart(data: {

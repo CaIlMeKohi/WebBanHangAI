@@ -18,7 +18,6 @@ import {
   applyCouponToCart,
   fetchAddresses,
   fetchCart,
-  fetchProductById,
   updateCartItem,
   type ApiAddress,
   type ApiCartItem,
@@ -51,42 +50,8 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
     orderId: number;
     amount: number;
   } | null>(null);
-
-  async function loadLocalCartItems() {
-    const storedItems = readStoredCart();
-    const hydratedItems = await Promise.all(
-      storedItems.map(async (item, index) => {
-        try {
-          const product = await fetchProductById(item.id);
-          return {
-            cart_item_id: index + 1,
-            product_id: Number(item.id),
-            product,
-            variant_id: null,
-            quantity: item.quantity,
-            size: item.size,
-            color: item.color,
-          } as ApiCartItem;
-        } catch {
-          return null;
-        }
-      }),
-    );
-    const nextItems = hydratedItems.filter(Boolean) as ApiCartItem[];
-    setItems(nextItems);
-    setSelectedIds(nextItems.map((item) => item.cart_item_id));
-  }
-
-  function writeLocalQuantity(item: ApiCartItem, quantity: number) {
-    const nextItems = readStoredCart().map((storedItem) =>
-      storedItem.id === String(item.product_id) &&
-      storedItem.size === item.size &&
-      storedItem.color === item.color
-        ? { ...storedItem, quantity }
-        : storedItem,
-    );
-    writeStoredCart(nextItems);
-  }
+  const [checkoutToken, setCheckoutToken] = useState("");
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
 
   function removeLocalItemsById(ids: number[]) {
     const targetItems = items.filter((item) => ids.includes(item.cart_item_id));
@@ -125,9 +90,13 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
           setReceiverName(defaultAddress.full_name);
           setReceiverPhone(defaultAddress.phone);
         }
-      } catch {
+      } catch (loadError) {
         if (isMounted) {
-          await loadLocalCartItems();
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Không tải được giỏ hàng từ máy chủ.",
+          );
         }
       }
     }
@@ -151,48 +120,61 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
   async function changeQuantity(item: ApiCartItem, delta: number) {
     if (!userId) return;
     const nextQuantity = Math.max(1, item.quantity + delta);
-    setItems((current) =>
-      current.map((candidate) =>
-        candidate.cart_item_id === item.cart_item_id
-          ? { ...candidate, quantity: nextQuantity }
-          : candidate,
-      ),
-    );
+    setError("");
     try {
-      await updateCartItem(userId, item.cart_item_id, nextQuantity);
-    } catch {
-      writeLocalQuantity(item, nextQuantity);
+      const updated = await updateCartItem(userId, item.cart_item_id, nextQuantity);
+      setItems((current) =>
+        current.map((candidate) =>
+          candidate.cart_item_id === item.cart_item_id ? updated : candidate,
+        ),
+      );
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error
+          ? updateError.message
+          : "Không thể cập nhật số lượng sản phẩm.",
+      );
     }
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
   }
 
   async function removeOne(itemId: number) {
     if (!userId) return;
-    setItems((current) =>
-      current.filter((item) => item.cart_item_id !== itemId),
-    );
-    setSelectedIds((current) => current.filter((id) => id !== itemId));
+    setError("");
     try {
       await deleteCartItem(userId, itemId);
-    } catch {
-      removeLocalItemsById([itemId]);
+      setItems((current) =>
+        current.filter((item) => item.cart_item_id !== itemId),
+      );
+      setSelectedIds((current) => current.filter((id) => id !== itemId));
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Không thể xóa sản phẩm khỏi giỏ hàng.",
+      );
     }
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
   }
 
   async function removeSelected() {
     if (!userId || selectedIds.length === 0) return;
     const ids = [...selectedIds];
-    setItems((current) =>
-      current.filter((item) => !ids.includes(item.cart_item_id)),
+    setError("");
+    const results = await Promise.allSettled(
+      ids.map((id) => deleteCartItem(userId, id)),
     );
-    setSelectedIds([]);
-    try {
-      await Promise.all(ids.map((id) => deleteCartItem(userId, id)));
-    } catch {
-      removeLocalItemsById(ids);
+    const deletedIds = ids.filter((_id, index) => results[index].status === "fulfilled");
+    if (deletedIds.length) {
+      setItems((current) =>
+        current.filter((item) => !deletedIds.includes(item.cart_item_id)),
+      );
+      setSelectedIds((current) => current.filter((id) => !deletedIds.includes(id)));
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
     }
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+    if (deletedIds.length !== ids.length) {
+      setError("Một số sản phẩm chưa xóa được. Vui lòng thử lại.");
+    }
   }
 
   function openCheckout() {
@@ -214,6 +196,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
     setReceiverPhone((current) => current || selectedAddress.phone);
     setPaymentMethod("cod");
     setPaidOrder(null);
+    setCheckoutToken(crypto.randomUUID());
     setIsCheckoutOpen(true);
   }
 
@@ -254,6 +237,8 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
       setError("Vui lòng nhập tên và số điện thoại người nhận.");
       return;
     }
+    if (isSubmittingOrder) return;
+    setIsSubmittingOrder(true);
     try {
       const ids = [...selectedIds];
       const order = await createOrder(userId, paymentMethod, ids, {
@@ -261,6 +246,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
         receiver_name: receiverName,
         receiver_phone: receiverPhone,
         coupon_code: couponCode.trim() || undefined,
+        checkout_token: checkoutToken || crypto.randomUUID(),
       });
       setPaidOrder({ orderId: order.order_id, amount: order.final_amount });
       if (paymentMethod === "cod") {
@@ -275,6 +261,8 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
       setError(
         err instanceof Error ? err.message : "Không thể thanh toán đơn hàng.",
       );
+    } finally {
+      setIsSubmittingOrder(false);
     }
   }
 
@@ -502,6 +490,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
           couponCode={couponCode}
           discountAmount={discountAmount}
           couponMessage={couponMessage}
+          isSubmittingOrder={isSubmittingOrder}
           setPaymentMethod={setPaymentMethod}
           setReceiverName={setReceiverName}
           setReceiverPhone={setReceiverPhone}
@@ -534,6 +523,7 @@ function CheckoutModal({
   couponCode,
   discountAmount,
   couponMessage,
+  isSubmittingOrder,
   setPaymentMethod,
   setReceiverName,
   setReceiverPhone,
@@ -556,6 +546,7 @@ function CheckoutModal({
   couponCode: string;
   discountAmount: number;
   couponMessage: string;
+  isSubmittingOrder: boolean;
   setPaymentMethod: (method: PaymentMethod) => void;
   setReceiverName: (value: string) => void;
   setReceiverPhone: (value: string) => void;
@@ -668,7 +659,8 @@ function CheckoutModal({
                 className={`rounded-lg border p-4 text-left ${paymentMethod === "bank_transfer" ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200"}`}
               >
                 <QrCode className="mb-1 h-5 w-5" />
-                <div className="font-medium">Chuyển khoản</div>
+                <div className="font-medium">Chuyển khoản mô phỏng</div>
+                <div className="text-xs opacity-75">Chỉ dùng để demo đồ án</div>
               </button>
             </div>
             <div className="mb-4 flex justify-between rounded bg-neutral-50 p-3 text-sm">
@@ -686,9 +678,10 @@ function CheckoutModal({
             )}
             <button
               onClick={onSubmit}
-              className="w-full rounded bg-neutral-950 py-3 font-medium text-white"
+              disabled={isSubmittingOrder}
+              className="w-full rounded bg-neutral-950 py-3 font-medium text-white disabled:opacity-50"
             >
-              Thanh toán
+              {isSubmittingOrder ? "Đang tạo đơn..." : "Thanh toán"}
             </button>
           </>
         )}

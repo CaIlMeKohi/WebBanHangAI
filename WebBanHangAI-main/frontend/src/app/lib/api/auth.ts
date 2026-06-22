@@ -91,12 +91,14 @@ export function resetPassword(resetToken: string, password: string) {
 }
 
 export async function fetchProfile(userId: number): Promise<ApiUser> {
-  return apiGet<ApiUser>(`/products/profile/?user_id=${userId}`);
+  void userId;
+  return apiGet<ApiUser>(`/products/profile/`);
 }
 
 export async function updateProfile(
   userId: number,
   data: Partial<Pick<ApiUser, "full_name" | "phone">>,
 ): Promise<ApiUser> {
-  return apiPut<ApiUser>(`/products/profile/`, { user_id: userId, ...data });
+  void userId;
+  return apiPut<ApiUser>(`/products/profile/`, data);
 }

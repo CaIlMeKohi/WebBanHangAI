@@ -12,7 +12,7 @@ from products.application.returns.use_cases import (
 )
 from products.domain.common.exceptions import BusinessRuleViolation
 from products.infrastructure.django_orm.return_repository import DjangoOrmReturnRepository
-from products.security.permissions import IsCustomer, IsStaff
+from products.security.permissions import CanHandleReturns, IsCustomer
 from products.business.serializers import ReturnRequestSerializer
 
 
@@ -41,7 +41,7 @@ class ReturnRequestListCreateAPIView(APIView):
 
 
 class StaffReturnAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanHandleReturns]
 
     def get(self, request):
         return Response(ReturnRequestSerializer(ListStaffReturnsUseCase(_return_repository()).execute(), many=True).data)

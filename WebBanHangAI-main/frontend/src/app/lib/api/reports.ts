@@ -37,15 +37,6 @@ function asApiArray<T>(
   return [];
 }
 
-async function safeGet<T>(path: string, fallback: T): Promise<T> {
-  try {
-    return await apiGet<T>(path);
-  } catch (error) {
-    console.warn(`Admin dashboard API failed: ${path}`, error);
-    return fallback;
-  }
-}
-
 export async function fetchAdminDashboard(): Promise<AdminDashboardSummary> {
   const [
     products,
@@ -57,20 +48,14 @@ export async function fetchAdminDashboard(): Promise<AdminDashboardSummary> {
     bestProducts,
     recommendationMetrics,
   ] = await Promise.all([
-    fetchAdminProducts().catch((error) => {
-      console.warn("Admin dashboard API failed: products", error);
-      return [];
-    }),
-    safeGet<ApiUser[] | { results: ApiUser[] }>(`/admin/users/`, []),
-    safeGet<ApiOrder[] | { results: ApiOrder[] }>(`/admin/orders`, []),
-    safeGet<Array<Record<string, unknown>>>(`/admin/inventory/low-stock`, []),
-    safeGet<{ revenue?: Array<Record<string, unknown>> }>(
-      `/admin/reports/revenue`,
-      { revenue: [] },
-    ),
-    safeGet<Array<Record<string, unknown>>>(`/admin/reports/order-status`, []),
-    safeGet<Array<Record<string, unknown>>>(`/admin/reports/best-products?top=5`, []),
-    safeGet<Record<string, unknown>>(`/admin/reports/recommendations`, {}),
+    fetchAdminProducts(),
+    apiGet<ApiUser[] | { results: ApiUser[] }>(`/admin/users/`),
+    apiGet<ApiOrder[] | { results: ApiOrder[] }>(`/admin/orders`),
+    apiGet<Array<Record<string, unknown>>>(`/admin/inventory/low-stock`),
+    apiGet<{ revenue?: Array<Record<string, unknown>> }>(`/admin/reports/revenue`),
+    apiGet<Array<Record<string, unknown>>>(`/admin/reports/order-status`),
+    apiGet<Array<Record<string, unknown>>>(`/admin/reports/best-products?top=5`),
+    apiGet<Record<string, unknown>>(`/admin/reports/recommendations`),
   ]);
 
   const revenue = asApiArray(revenueResponse);

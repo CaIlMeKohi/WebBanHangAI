@@ -4,9 +4,6 @@
     Run this file in SSMS after restoring or creating the database schema.
     The script is idempotent: CREATE OR ALTER keeps existing deployments safe.
 */
-USE [FASHION_AI_SHOP_DB];
-GO
-
 CREATE OR ALTER PROCEDURE dbo.sp_CheckVariantStock
     @VariantId BIGINT,
     @Quantity INT

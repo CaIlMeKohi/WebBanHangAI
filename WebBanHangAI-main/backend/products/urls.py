@@ -34,6 +34,7 @@ from .views import (
     ProductAdminHistoryAPIView,
     WishlistAPIView,
 )
+from .interfaces.api.wishlist_views import WishlistItemAPIView
 
 router = DefaultRouter()
 router.register('admin/categories', AdminCategoryViewSet, basename='admin-categories')
@@ -55,6 +56,7 @@ urlpatterns = [
     path('cart/apply-coupon/', ApplyCouponAPIView.as_view(), name='cart-apply-coupon'),
     path('cart/<int:item_id>/', CartItemAPIView.as_view(), name='cart-item'),
     path('wishlist/', WishlistAPIView.as_view(), name='wishlist'),
+    path('wishlist/<int:product_id>/', WishlistItemAPIView.as_view(), name='wishlist-item'),
     path('orders/', OrderListCreateAPIView.as_view(), name='order-list-create'),
     path('orders/<int:order_id>/', OrderDetailAPIView.as_view(), name='order-detail'),
     path('orders/<int:order_id>/cancel/', OrderCancelAPIView.as_view(), name='order-cancel'),

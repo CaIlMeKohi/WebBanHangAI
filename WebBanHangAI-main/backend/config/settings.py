@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -108,6 +109,15 @@ else:
         }
     }
 
+if 'test' in sys.argv and _env_bool('TEST_USE_SQLITE', 'True'):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
+    MIGRATION_MODULES = {'products': None}
+
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -143,3 +153,5 @@ EMAIL_HOST_USER = _env('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = _env('EMAIL_HOST_PASSWORD').replace(' ', '')
 DEFAULT_FROM_EMAIL = _env('DEFAULT_FROM_EMAIL', f'Fashion Shop <{EMAIL_HOST_USER}>')
 EMAIL_TIMEOUT = int(_env('EMAIL_TIMEOUT', '15'))
+PAYMENT_WEBHOOK_SECRET = _env('PAYMENT_WEBHOOK_SECRET')
+PAYMENT_PENDING_TIMEOUT_MINUTES = int(_env('PAYMENT_PENDING_TIMEOUT_MINUTES', '15'))

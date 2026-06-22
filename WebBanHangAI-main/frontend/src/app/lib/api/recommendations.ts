@@ -34,9 +34,7 @@ export async function fetchForYouRecommendations(
   }
 
   const params = new URLSearchParams({ limit: String(limit) });
-  if (userId) {
-    params.set("user_id", userId);
-  } else {
+  if (!userId) {
     params.set("session_id", sessionId);
   }
   if (typeof search === "string" && search.trim()) {

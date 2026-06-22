@@ -41,6 +41,7 @@ class CreateOrderDTO:
     receiver_name: str | None = None
     receiver_phone: str | None = None
     coupon_code: str | None = None
+    checkout_token: str | None = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> 'CreateOrderDTO':
@@ -55,6 +56,7 @@ class CreateOrderDTO:
             receiver_name=payload.get('receiver_name'),
             receiver_phone=payload.get('receiver_phone'),
             coupon_code=payload.get('coupon_code'),
+            checkout_token=str(payload.get('checkout_token') or '').strip() or None,
         )
 
 

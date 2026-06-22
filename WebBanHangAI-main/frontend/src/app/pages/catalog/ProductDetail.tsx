@@ -16,12 +16,15 @@ import type { Product } from "../../data/products";
 import {
   addCartItem,
   addWishlistItem,
+  deleteWishlistItem,
   fetchProductById,
+  fetchProductReviews,
   fetchRelatedProducts,
   fetchWishlist,
+  type ProductReview,
 } from "../../lib/api";
 import { useAdminAuth } from "../../context/AdminAuthContext";
-import { CART_UPDATED_EVENT, addStoredCartItem } from "../../lib/cartStorage";
+import { CART_UPDATED_EVENT } from "../../lib/cartStorage";
 import {
   formatCurrency,
   formatShortDate,
@@ -31,6 +34,7 @@ import { dispatchCartAddedNotice } from "../../lib/cartNotice";
 import {
   addStoredWishlistId,
   readStoredWishlistIds,
+  writeStoredWishlistIds,
 } from "../../lib/wishlistStorage";
 
 export function ProductDetail() {
@@ -40,9 +44,13 @@ export function ProductDetail() {
   const location = useLocation();
   const [product, setProduct] = useState<Product | undefined>();
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+  const [reviews, setReviews] = useState<ProductReview[]>([]);
+  const [isReviewsLoading, setIsReviewsLoading] = useState(true);
+  const [reviewError, setReviewError] = useState("");
   const [selectedSize, setSelectedSize] = useState("");
   const [selectedColor, setSelectedColor] = useState("");
   const [quantity, setQuantity] = useState(1);
+  const [actionError, setActionError] = useState("");
   const [isLiked, setIsLiked] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -59,9 +67,11 @@ export function ProductDetail() {
   useEffect(() => {
     if (!product) return;
     setCurrentImageIndex(0);
-    setSelectedColor(product.colors[0] ?? "");
-    setSelectedSize(product.sizes[0] ?? "");
+    const firstVariant = product.variants?.[0];
+    setSelectedColor(firstVariant?.color ?? product.colors[0] ?? "");
+    setSelectedSize(firstVariant?.size ?? product.sizes[0] ?? "");
     setQuantity(1);
+    setActionError("");
   }, [product]);
 
   useEffect(() => {
@@ -74,22 +84,39 @@ export function ProductDetail() {
 
     async function loadProductDetail() {
       setIsLoading(true);
+      setIsReviewsLoading(true);
+      setReviewError("");
       try {
         const apiProduct = await fetchProductById(id as string);
-        const apiRelated = await fetchRelatedProducts(id as string, 4).catch(
-          () => [],
-        );
+        const [apiRelated, apiReviews] = await Promise.all([
+          fetchRelatedProducts(id as string, 4).catch(() => []),
+          fetchProductReviews(id as string).catch((error) => {
+            if (isMounted) {
+              setReviewError(
+                error instanceof Error
+                  ? error.message
+                  : "Không tải được đánh giá sản phẩm.",
+              );
+            }
+            return [];
+          }),
+        ]);
         if (isMounted) {
           setProduct(apiProduct);
           setRelatedProducts(apiRelated);
+          setReviews(apiReviews);
         }
       } catch {
         if (isMounted) {
           setProduct(undefined);
           setRelatedProducts([]);
+          setReviews([]);
         }
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+          setIsReviewsLoading(false);
+        }
       }
     }
 
@@ -163,6 +190,22 @@ export function ProductDetail() {
             100,
         )
       : null;
+  const availableVariants = product.variants ?? [];
+  const selectedVariant = availableVariants.find(
+    (variant) => variant.color === selectedColor && variant.size === selectedSize,
+  );
+  const availableColors = availableVariants.length
+    ? Array.from(new Set(availableVariants.map((variant) => variant.color)))
+    : product.colors;
+  const availableSizes = availableVariants.length
+    ? Array.from(
+        new Set(
+          availableVariants
+            .filter((variant) => variant.color === selectedColor)
+            .map((variant) => variant.size),
+        ),
+      )
+    : product.sizes;
 
   const handleAddToCart = async () => {
     const size = selectedSize || product.sizes[0] || "STD";
@@ -173,25 +216,36 @@ export function ProductDetail() {
       return;
     }
 
+    if (availableVariants.length && !selectedVariant) {
+      setActionError("Tổ hợp màu và kích cỡ này hiện không còn hàng.");
+      return false;
+    }
+
+    setActionError("");
     try {
       await addCartItem({
         user_id: userId,
         product_id: product.id,
+        variant_id: selectedVariant?.variant_id,
         quantity,
         size,
         color,
       });
-    } catch {
-      addStoredCartItem({ id: String(product.id), quantity, size, color });
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Không thể thêm sản phẩm vào giỏ hàng.",
+      );
+      return false;
     }
 
     window.dispatchEvent(new Event(CART_UPDATED_EVENT));
     dispatchCartAddedNotice();
+    return true;
   };
 
   const handleBuyNow = async () => {
-    await handleAddToCart();
-    if (userId) {
+    const added = await handleAddToCart();
+    if (userId && added) {
       navigate("/cart");
     }
   };
@@ -201,11 +255,25 @@ export function ProductDetail() {
       redirectToLogin();
       return;
     }
-    if (isLiked) return;
-    setIsLiked(true);
-    addStoredWishlistId(String(product.id));
-    await addWishlistItem(userId, product.id).catch(() => undefined);
-    window.dispatchEvent(new Event("wishlist:updated"));
+    setActionError("");
+    try {
+      if (isLiked) {
+        await deleteWishlistItem(userId, product.id);
+        setIsLiked(false);
+        writeStoredWishlistIds(
+          readStoredWishlistIds().filter((productId) => productId !== String(product.id)),
+        );
+      } else {
+        await addWishlistItem(userId, product.id);
+        setIsLiked(true);
+        addStoredWishlistId(String(product.id));
+      }
+      window.dispatchEvent(new Event("wishlist:updated"));
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Không thể cập nhật danh sách yêu thích.",
+      );
+    }
   };
 
   return (
@@ -407,10 +475,22 @@ export function ProductDetail() {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
-                {product.colors.map((color) => (
+                {availableColors.map((color) => (
                   <button
                     key={color}
-                    onClick={() => setSelectedColor(color)}
+                    onClick={() => {
+                      setSelectedColor(color);
+                      const matchingVariants = availableVariants.filter(
+                        (variant) => variant.color === color,
+                      );
+                      if (
+                        matchingVariants.length &&
+                        !matchingVariants.some((variant) => variant.size === selectedSize)
+                      ) {
+                        setSelectedSize(matchingVariants[0].size);
+                      }
+                      setActionError("");
+                    }}
                     className={`h-10 w-10 rounded-full border-2 transition-all ${
                       selectedColor === color
                         ? "border-neutral-900 ring-2 ring-neutral-200 dark:border-white dark:ring-neutral-700"
@@ -435,10 +515,13 @@ export function ProductDetail() {
                 )}
               </div>
               <div className="grid grid-cols-5 gap-2">
-                {product.sizes.map((size) => (
+                {availableSizes.map((size) => (
                   <button
                     key={size}
-                    onClick={() => setSelectedSize(size)}
+                    onClick={() => {
+                      setSelectedSize(size);
+                      setActionError("");
+                    }}
                     className={`border py-3 text-sm font-medium transition-colors ${
                       selectedSize === size
                         ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900"
@@ -497,6 +580,11 @@ export function ProductDetail() {
               >
                 MUA NGAY
               </button>
+              {actionError && (
+                <p className="text-sm text-red-600" role="alert">
+                  {actionError}
+                </p>
+              )}
             </div>
 
             <div className="space-y-3 border-b border-neutral-200 pb-8 dark:border-neutral-800">
@@ -508,7 +596,7 @@ export function ProductDetail() {
               </div>
               <div className="flex items-center gap-3">
                 <RotateCcw className="h-5 w-5 text-neutral-600 dark:text-neutral-400" />
-                <span className="text-sm">Đổi trả trong 30 ngày</span>
+                <span className="text-sm">Đổi trả trong 7 ngày</span>
               </div>
               <div className="flex items-center gap-3">
                 <ShieldCheck className="h-5 w-5 text-neutral-600 dark:text-neutral-400" />
@@ -517,6 +605,106 @@ export function ProductDetail() {
             </div>
           </div>
         </div>
+
+        <section className="mt-16 border-t border-neutral-200 pt-12 dark:border-neutral-800">
+          <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-light tracking-wide">
+                Đánh giá sản phẩm
+              </h2>
+              <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+                Chỉ hiển thị đánh giá đã được kiểm duyệt.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex">
+                {[...Array(5)].map((_, index) => (
+                  <Star
+                    key={index}
+                    className={`h-5 w-5 ${
+                      index < Math.floor(product.rating)
+                        ? "fill-amber-400 text-amber-400"
+                        : "text-neutral-300 dark:text-neutral-700"
+                    }`}
+                  />
+                ))}
+              </div>
+              <span className="text-sm font-medium">
+                {product.rating} / 5 ({product.reviews} đánh giá)
+              </span>
+            </div>
+          </div>
+
+          {isReviewsLoading ? (
+            <div className="border-y border-neutral-200 py-10 text-center text-sm text-neutral-500 dark:border-neutral-800">
+              Đang tải đánh giá...
+            </div>
+          ) : reviewError ? (
+            <div className="border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {reviewError}
+            </div>
+          ) : reviews.length === 0 ? (
+            <div className="border-y border-neutral-200 py-10 text-center text-sm text-neutral-500 dark:border-neutral-800">
+              Sản phẩm chưa có đánh giá được duyệt.
+            </div>
+          ) : (
+            <div className="divide-y divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+              {reviews.map((review) => (
+                <article key={review.review_id} className="py-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium">Khách hàng đã mua</div>
+                      <div className="mt-2 flex" aria-label={`${review.rating} trên 5 sao`}>
+                        {[...Array(5)].map((_, index) => (
+                          <Star
+                            key={index}
+                            className={`h-4 w-4 ${
+                              index < review.rating
+                                ? "fill-amber-400 text-amber-400"
+                                : "text-neutral-300 dark:text-neutral-700"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {review.created_at && (
+                      <time
+                        dateTime={review.created_at}
+                        className="text-sm text-neutral-500"
+                      >
+                        {new Date(review.created_at).toLocaleDateString("vi-VN")}
+                      </time>
+                    )}
+                  </div>
+
+                  <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-neutral-700 dark:text-neutral-300">
+                    {review.comment || "Khách hàng không để lại nội dung."}
+                  </p>
+
+                  {review.image_urls?.length ? (
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      {review.image_urls.map((url, index) => (
+                        <a
+                          key={`${review.review_id}-${url}`}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Xem ảnh đánh giá ${index + 1}`}
+                        >
+                          <img
+                            src={url}
+                            alt={`Ảnh đánh giá ${index + 1}`}
+                            className="h-24 w-24 border border-neutral-200 object-cover dark:border-neutral-800"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="mx-[-1rem] mt-16 bg-gradient-to-b from-blue-50/30 to-white px-4 py-12 dark:from-blue-950/10 dark:to-neutral-900 sm:mx-[-1.5rem] sm:px-6 lg:mx-[-2rem] lg:px-8">
           <div className="mb-8 flex items-center gap-3">

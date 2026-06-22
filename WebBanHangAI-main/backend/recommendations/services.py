@@ -1,7 +1,7 @@
 from collections import Counter
 
 from django.db import DatabaseError
-from django.db.models import Count, Exists, F, Max, OuterRef
+from django.db.models import Count, Exists, F, Max, OuterRef, Sum
 from django.utils import timezone
 
 from products.models import Customer, PrecomputedRecommendation, Product, ProductVariant, UserInteraction
@@ -117,6 +117,38 @@ def _collect_user_preferences(customer_id: int | None, session_id: str | None) -
 def _parse_user(user_id: str | None) -> int | None:
     if user_id is None:
         return None
+
+
+def _collaborative_scores(customer_id: int | None) -> dict[int, float]:
+    if customer_id is None:
+        return {}
+    interested_product_ids = list(
+        UserInteraction.objects.filter(user_id=customer_id)
+        .values_list('product_id', flat=True)
+        .distinct()[:100]
+    )
+    if not interested_product_ids:
+        return {}
+    similar_users = list(
+        UserInteraction.objects.filter(product_id__in=interested_product_ids)
+        .exclude(user_id=customer_id)
+        .values('user_id')
+        .annotate(overlap=Count('product_id', distinct=True))
+        .order_by('-overlap')
+        .values_list('user_id', flat=True)[:50]
+    )
+    if not similar_users:
+        return {}
+    rows = (
+        UserInteraction.objects.filter(user_id__in=similar_users)
+        .exclude(product_id__in=interested_product_ids)
+        .values('product_id')
+        .annotate(collaborative_score=Sum('score'), audience=Count('user_id', distinct=True))
+    )
+    return {
+        row['product_id']: float(row['collaborative_score'] or 0) + float(row['audience'] or 0)
+        for row in rows
+    }
     try:
         return int(user_id)
     except ValueError:
@@ -153,6 +185,7 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
     search = (search or '').strip()
 
     preferences = _collect_user_preferences(customer_id, session_id)
+    collaborative_scores = _collaborative_scores(customer_id)
 
     # If a search query is provided, boost search terms in preferences so
     # matching products are prioritized for the "for you" recommendations.
@@ -237,6 +270,7 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
             + category_interest * 10
             + category_recency * 0.35
             + brand_interest * 6
+            + collaborative_scores.get(product.product_id, 0) * 12
             + popularity
         )
         scored_by_bucket[timeline_bucket].append((score, product.product_id))

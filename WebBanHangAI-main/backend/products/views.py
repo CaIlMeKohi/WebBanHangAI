@@ -43,7 +43,7 @@ from .interfaces.api.user_views import (
 )
 from .interfaces.api.wishlist_views import WishlistAPIView as CleanWishlistAPIView
 from .models import Address, AuditLog, CartItem, Coupon, Customer, Order, Product, ProductVariant, StoreUser, UserInteraction
-from .security.permissions import IsAdmin, IsStaff
+from .security.permissions import IsAdmin, IsCustomer, IsStaff
 from .serializers import (
     AddressSerializer,
     CouponSerializer,
@@ -184,15 +184,10 @@ class ProductAdminHistoryAPIView(APIView):
 class UserEventCreateAPIView(generics.CreateAPIView):
     queryset = UserInteraction.objects.all()
     serializer_class = UserProductEventSerializer
+    permission_classes = [IsCustomer]
 
     def perform_create(self, serializer):
-        interaction_type = serializer.validated_data.get('interaction_type')
-        user_id = serializer.validated_data.get('user_id')
-        if interaction_type in {'add_to_cart', 'wishlist_add', 'purchase'} and not user_id:
-            from rest_framework.exceptions import ValidationError
-
-            raise ValidationError({'user_id': 'Dang nhap de ghi nhan hanh vi nay.'})
-        serializer.save()
+        serializer.save(user=self.request.user.customer_profile)
 
 
 class CategoryListAPIView(CatalogCategoryListAPIView):
@@ -238,14 +233,16 @@ def _variant_label(variant):
 
 
 class ProfileAPIView(APIView):
+    permission_classes = [IsCustomer]
+
     def get(self, request):
-        user = _get_user(request)
+        user = request.user
         if not user:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(StoreUserSerializer(user).data)
 
     def put(self, request):
-        user = _get_user(request)
+        user = request.user
         if not user:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -266,8 +263,10 @@ class ProfileAPIView(APIView):
 
 
 class AddressListCreateAPIView(APIView):
+    permission_classes = [IsCustomer]
+
     def get(self, request):
-        user = _get_user(request)
+        user = request.user
         customer = _get_customer(user)
         if not customer:
             return Response([])
@@ -275,7 +274,7 @@ class AddressListCreateAPIView(APIView):
         return Response(AddressSerializer(addresses, many=True).data)
 
     def post(self, request):
-        user = _get_user(request)
+        user = request.user
         customer = _get_customer(user)
         if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -296,8 +295,10 @@ class AddressListCreateAPIView(APIView):
 
 
 class AddressDetailAPIView(APIView):
+    permission_classes = [IsCustomer]
+
     def put(self, request, address_id):
-        user = _get_user(request)
+        user = request.user
         customer = _get_customer(user)
         address = Address.objects.filter(address_id=address_id, user=customer).first()
         if address is None:
@@ -315,7 +316,7 @@ class AddressDetailAPIView(APIView):
         return Response(AddressSerializer(address).data)
 
     def delete(self, request, address_id):
-        user = _get_user(request)
+        user = request.user
         customer = _get_customer(user)
         address = Address.objects.filter(address_id=address_id, user=customer).first()
         if address is None:
@@ -345,7 +346,7 @@ class WishlistAPIView(CleanWishlistAPIView):
 class OrderListCreateAPIView(CleanCustomerOrderListAPIView):
     @transaction.atomic
     def post(self, request):
-        user = _get_user(request)
+        user = request.user
         customer = _get_customer(user)
         if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -357,7 +358,12 @@ class OrderListCreateAPIView(CleanCustomerOrderListAPIView):
             )
         except BusinessRuleViolation as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
+        response_status = (
+            status.HTTP_200_OK
+            if getattr(order, '_idempotent_replay', False)
+            else status.HTTP_201_CREATED
+        )
+        return Response(OrderSerializer(order).data, status=response_status)
 
 
 class BrandListAPIView(CatalogBrandListAPIView):
@@ -460,8 +466,10 @@ class AdminCouponViewSet(viewsets.ModelViewSet):
 
 
 class CartClearAPIView(APIView):
+    permission_classes = [IsCustomer]
+
     def delete(self, request):
-        user = _get_user(request)
+        user = request.user
         customer = _get_customer(user)
         if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)

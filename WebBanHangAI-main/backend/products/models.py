@@ -387,6 +387,8 @@ class Order(models.Model):
         ('pending', 'Pending'),
         ('paid', 'Paid'),
         ('failed', 'Failed'),
+        ('expired', 'Expired'),
+        ('refund_pending', 'Refund pending'),
         ('refunded', 'Refunded'),
     ]
     PAYMENT_METHOD_CHOICES = [('cod', 'COD'), ('vnpay', 'VNPay'), ('momo', 'MoMo'), ('bank_transfer', 'Bank Transfer')]
@@ -410,6 +412,8 @@ class Order(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_column='order_status')
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+    checkout_token = models.CharField(max_length=64, null=True, blank=True)
+    payment_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -418,6 +422,13 @@ class Order(models.Model):
         indexes = [
             models.Index(fields=['user'], name='idx_orders_customer'),
             models.Index(fields=['user', 'created_at'], name='idx_orders_customer_created'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['checkout_token'],
+                condition=models.Q(checkout_token__isnull=False),
+                name='uq_orders_checkout_token_not_null',
+            ),
         ]
 
 
@@ -461,7 +472,14 @@ class StockReservation(models.Model):
 
 
 class Payment(models.Model):
-    STATUS_CHOICES = [('pending', 'Pending'), ('success', 'Success'), ('failed', 'Failed')]
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('expired', 'Expired'),
+        ('refund_pending', 'Refund pending'),
+        ('refunded', 'Refunded'),
+    ]
     PAYMENT_METHOD_CHOICES = [('cod', 'COD'), ('vnpay', 'VNPay'), ('momo', 'MoMo'), ('bank_transfer', 'Bank Transfer')]
 
     payment_id = models.BigAutoField(primary_key=True)
@@ -472,6 +490,8 @@ class Payment(models.Model):
     gateway_response = models.TextField(null=True, blank=True)
     failure_reason = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    expires_at = models.DateTimeField(null=True, blank=True)
+    refund_reference = models.CharField(max_length=255, null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     refunded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -479,6 +499,13 @@ class Payment(models.Model):
 
     class Meta:
         db_table = 'payments'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['refund_reference'],
+                condition=models.Q(refund_reference__isnull=False),
+                name='uq_payments_refund_reference_not_null',
+            ),
+        ]
 
 
 class Review(models.Model):

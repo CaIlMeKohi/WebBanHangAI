@@ -16,14 +16,16 @@ import {
   addCartItem,
   cancelCustomerOrder,
   confirmOrderReceived,
+  createReturnRequest,
   createProductReview,
   createAddress,
   deleteAddress,
+  deleteWishlistItem,
   fetchAddresses,
   fetchOrders,
-  fetchCart,
   fetchProductById,
   fetchProfile,
+  fetchReturnRequests,
   fetchWishlist,
   requestPasswordReset,
   resetPassword,
@@ -31,15 +33,12 @@ import {
   updateProfile,
   verifyPasswordResetOtp,
   type ApiOrder,
+  type ApiReturnRequest,
 } from "../../lib/api";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import { Cart } from "../cart/Cart";
 import { dispatchCartAddedNotice } from "../../lib/cartNotice";
-import {
-  addStoredCartItem,
-  CART_UPDATED_EVENT,
-  readStoredCart,
-} from "../../lib/cartStorage";
+import { CART_UPDATED_EVENT } from "../../lib/cartStorage";
 import {
   hasStoredWishlistIds,
   readStoredWishlistIds,
@@ -69,6 +68,8 @@ type MockOrder = {
   paymentStatus?: string;
   shippingFee?: number;
   discountAmount?: number;
+  shipment?: ApiOrder["shipment"];
+  statusHistories: NonNullable<ApiOrder["status_histories"]>;
   items: MockOrderItem[];
 };
 
@@ -77,12 +78,6 @@ type OrderProduct = Product & {
   size: string;
   color: string;
   orderPrice: number;
-};
-
-type CartProduct = Product & {
-  quantity: number;
-  size: string;
-  color: string;
 };
 
 type UserAddress = {
@@ -108,9 +103,9 @@ export function Profile() {
     phone: "0912345678",
   });
   const [mockOrders, setMockOrders] = useState<MockOrder[]>([]);
-  const [cartItems, setCartItems] = useState<CartProduct[]>([]);
   const [wishlistItems, setWishlistItems] = useState<any[]>([]);
   const [selectedWishlistIds, setSelectedWishlistIds] = useState<string[]>([]);
+  const [wishlistMessage, setWishlistMessage] = useState("");
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [addressMessage, setAddressMessage] = useState("");
   const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
@@ -137,6 +132,12 @@ export function Profile() {
   const [reviewImages, setReviewImages] = useState<File[]>([]);
   const [reviewMessage, setReviewMessage] = useState("");
   const [reviewedOrderItems, setReviewedOrderItems] = useState<number[]>([]);
+  const [returnRequests, setReturnRequests] = useState<ApiReturnRequest[]>([]);
+  const [returnTarget, setReturnTarget] = useState<{ order: MockOrder; item: MockOrderItem } | null>(null);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnSolution, setReturnSolution] = useState("refund");
+  const [returnEvidenceUrl, setReturnEvidenceUrl] = useState("");
+  const [returnMessage, setReturnMessage] = useState("");
   const [settingsModal, setSettingsModal] = useState<"profile" | "password" | null>(null);
   const [editProfile, setEditProfile] = useState({ full_name: "", phone: "" });
   const [passwordStep, setPasswordStep] = useState<"send" | "otp" | "password">("send");
@@ -206,26 +207,6 @@ export function Profile() {
     finally { setSettingsLoading(false); }
   }
 
-  async function loadLocalCartItems() {
-    const storedItems = readStoredCart();
-    const hydratedItems = await Promise.all(
-      storedItems.map(async (item) => {
-        try {
-          const product = await fetchProductById(item.id);
-          return {
-            ...product,
-            quantity: item.quantity,
-            size: item.size,
-            color: item.color,
-          };
-        } catch {
-          return null;
-        }
-      }),
-    );
-    setCartItems(hydratedItems.filter(Boolean) as CartProduct[]);
-  }
-
   async function loadLocalWishlistItems() {
     const storedIds = readStoredWishlistIds();
     const hydratedItems = await Promise.all(
@@ -262,68 +243,40 @@ export function Profile() {
     const activeUserId = userId;
 
     async function loadProfileData() {
-      try {
-        const [apiProfile, apiOrders, apiWishlist, apiCart] = await Promise.all(
-          [
-            fetchProfile(activeUserId),
-            fetchOrders(activeUserId),
-            fetchWishlist(activeUserId),
-            fetchCart(activeUserId),
-          ],
-        );
-        setProfile(apiProfile);
-        try {
-          setAddresses(await fetchAddresses(activeUserId));
-        } catch {
-          setAddresses([]);
-        }
-        setMockOrders(
-          apiOrders.map((order) => ({
-            id: `ORD-${order.order_id}`,
-            orderId: order.order_id,
-            date: new Date(order.created_at).toLocaleDateString("vi-VN"),
-            status: getOrderStatusLabel(order.status),
-            statusRaw: order.status,
-            total: order.final_amount,
-            shippingAddress: order.shipping_address,
-            paymentMethod: order.payment_method,
-            paymentStatus: order.payment_status,
-            shippingFee: order.shipping_fee,
-            discountAmount: order.discount_amount,
-            items: order.items.map((item) => ({
-              order_item_id: item.order_item_id,
-              product: item.product,
-              quantity: item.quantity,
-              size: item.size_snapshot || item.product.sizes[0] || "STD",
-              color: item.color_snapshot || item.product.colors[0] || "Mặc định",
-              price: item.price,
-              subtotal: item.subtotal,
-            })),
-          })),
-        );
-        setCartItems(
-          apiCart.map((item) => ({
-            ...item.product,
-            quantity: item.quantity,
-            size: item.size,
-            color: item.color,
-          })),
-        );
-        const localWishlistIds = readStoredWishlistIds();
-        if (hasStoredWishlistIds()) {
-          await loadLocalWishlistItems();
-        } else if (apiWishlist.length > 0) {
-          await seedWishlistFromApi(apiWishlist);
+      const [profileResult, ordersResult, wishlistResult, addressResult, returnsResult] =
+        await Promise.allSettled([
+          fetchProfile(activeUserId),
+          fetchOrders(activeUserId),
+          fetchWishlist(activeUserId),
+          fetchAddresses(activeUserId),
+          fetchReturnRequests(),
+        ]);
+
+      if (profileResult.status === "fulfilled") setProfile(profileResult.value);
+      if (ordersResult.status === "fulfilled") {
+        setMockOrders(ordersResult.value.map(toMockOrder));
+      } else {
+        setMockOrders([]);
+        setOrderMessage("Không tải được lịch sử đơn hàng. Vui lòng thử lại.");
+      }
+      if (addressResult.status === "fulfilled") {
+        setAddresses(addressResult.value);
+      } else {
+        setAddresses([]);
+        setAddressMessage("Không tải được địa chỉ giao hàng.");
+      }
+      if (wishlistResult.status === "fulfilled") {
+        if (wishlistResult.value.length > 0) {
+          await seedWishlistFromApi(wishlistResult.value);
         } else {
           setWishlistItems([]);
           setSelectedWishlistIds([]);
+          writeStoredWishlistIds([]);
         }
-      } catch {
-        setMockOrders([]);
-        setAddresses([]);
-        await loadLocalCartItems();
+      } else {
         await loadLocalWishlistItems();
       }
+      setReturnRequests(returnsResult.status === "fulfilled" ? returnsResult.value : []);
     }
 
     loadProfileData();
@@ -348,45 +301,68 @@ export function Profile() {
 
     const size = product?.sizes?.[0] ?? "STD";
     const color = product?.colors?.[0] ?? "Mặc định";
+    const variant = product?.variants?.find(
+      (item: { available_stock?: number }) => Number(item.available_stock ?? 0) > 0,
+    );
 
-    if (userId) {
-      try {
-        await addCartItem({
-          user_id: userId,
-          product_id: product.id,
-          quantity: 1,
-          size,
-          color,
-        });
-        window.dispatchEvent(new Event(CART_UPDATED_EVENT));
-      } catch {
-        addStoredCartItem({ id: String(product.id), quantity: 1, size, color });
-      }
-    } else {
-      addStoredCartItem({ id: String(product.id), quantity: 1, size, color });
+    if (!userId) return;
+    setWishlistMessage("");
+    try {
+      await addCartItem({
+        user_id: userId,
+        product_id: product.id,
+        variant_id: variant?.variant_id,
+        quantity: 1,
+        size: variant?.size ?? size,
+        color: variant?.color ?? color,
+      });
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+      dispatchCartAddedNotice();
+    } catch (error) {
+      setWishlistMessage(
+        error instanceof Error ? error.message : "Không thể thêm sản phẩm vào giỏ hàng.",
+      );
     }
-
-    dispatchCartAddedNotice();
   };
 
-  const removeWishlistItem = (productId: string) => {
-    removeStoredWishlistId(productId);
+  const removeWishlistItem = async (productId: string) => {
+    if (!userId) return;
+    setWishlistMessage("");
+    try {
+      await deleteWishlistItem(userId, productId);
+      removeStoredWishlistId(productId);
+      setWishlistItems((current) =>
+        current.filter((item) => String(item.id) !== productId),
+      );
+      setSelectedWishlistIds((current) =>
+        current.filter((id) => id !== productId),
+      );
+    } catch (error) {
+      setWishlistMessage(
+        error instanceof Error ? error.message : "Không thể xóa sản phẩm yêu thích.",
+      );
+    }
+  };
+
+  const removeSelectedWishlistItems = async () => {
+    if (!userId || selectedWishlistIds.length === 0) return;
+    setWishlistMessage("");
+    const results = await Promise.allSettled(
+      selectedWishlistIds.map((productId) => deleteWishlistItem(userId, productId)),
+    );
+    const deletedIds = selectedWishlistIds.filter(
+      (_productId, index) => results[index].status === "fulfilled",
+    );
+    deletedIds.forEach(removeStoredWishlistId);
     setWishlistItems((current) =>
-      current.filter((item) => String(item.id) !== productId),
+      current.filter((item) => !deletedIds.includes(String(item.id))),
     );
     setSelectedWishlistIds((current) =>
-      current.filter((id) => id !== productId),
+      current.filter((id) => !deletedIds.includes(id)),
     );
-  };
-
-  const removeSelectedWishlistItems = () => {
-    selectedWishlistIds.forEach((productId) =>
-      removeStoredWishlistId(productId),
-    );
-    setWishlistItems((current) =>
-      current.filter((item) => !selectedWishlistIds.includes(String(item.id))),
-    );
-    setSelectedWishlistIds([]);
+    if (deletedIds.length !== results.length) {
+      setWishlistMessage("Một số sản phẩm chưa xóa được. Vui lòng thử lại.");
+    }
   };
 
   async function reloadAddresses() {
@@ -541,6 +517,32 @@ export function Profile() {
       setCancelOrderError(error instanceof Error ? error.message : "Không thể hủy đơn hàng.");
     } finally {
       setIsCancellingOrder(false);
+    }
+  }
+
+  async function submitReturnRequest(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!returnTarget) return;
+    if (!returnReason.trim() || !returnEvidenceUrl.trim()) {
+      setReturnMessage("Vui lòng nhập lý do và đường dẫn ảnh minh chứng.");
+      return;
+    }
+    setReturnMessage("");
+    try {
+      const created = await createReturnRequest({
+        order_id: returnTarget.order.orderId,
+        order_item_id: returnTarget.item.order_item_id,
+        reason: returnReason.trim(),
+        desired_solution: returnSolution,
+        images: [returnEvidenceUrl.trim()],
+      });
+      setReturnRequests((current) => [created, ...current]);
+      setReturnTarget(null);
+      setReturnReason("");
+      setReturnEvidenceUrl("");
+      setReturnMessage("Đã gửi yêu cầu đổi trả. Nhân viên sẽ kiểm tra và phản hồi.");
+    } catch (error) {
+      setReturnMessage(error instanceof Error ? error.message : "Không gửi được yêu cầu đổi trả.");
     }
   }
 
@@ -854,6 +856,11 @@ export function Profile() {
                         {reviewMessage}
                       </div>
                     )}
+                    {returnMessage && (
+                      <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+                        {returnMessage}
+                      </div>
+                    )}
                     {mockOrders.map((order: MockOrder) => {
                       const orderProducts: OrderProduct[] = order.items.map(
                         (item: MockOrderItem) => ({
@@ -921,6 +928,21 @@ export function Profile() {
                                         Gửi đánh giá
                                       </button>
                                     )}
+                                    {["delivered", "completed"].includes(order.statusRaw) &&
+                                      !returnRequests.some(
+                                        (request) => request.order_item === order.items[idx]?.order_item_id,
+                                      ) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setReturnTarget({ order, item: order.items[idx] });
+                                            setReturnMessage("");
+                                          }}
+                                          className="ml-2 mt-3 rounded border border-neutral-300 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                                        >
+                                          Yêu cầu đổi trả
+                                        </button>
+                                      )}
                                   </div>
                                 </div>
                               ),
@@ -997,6 +1019,11 @@ export function Profile() {
                 <h2 className="text-2xl font-light tracking-wide mb-6">
                   Danh sách yêu thích
                 </h2>
+                {wishlistMessage && (
+                  <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {wishlistMessage}
+                  </div>
+                )}
                 {wishlistItems.length === 0 ? (
                   <div className="text-center py-16">
                     <Heart className="w-16 h-16 mx-auto mb-4 text-neutral-300" />
@@ -1034,7 +1061,7 @@ export function Profile() {
                         Chọn tất cả
                       </label>
                       <button
-                        onClick={removeSelectedWishlistItems}
+                        onClick={() => void removeSelectedWishlistItems()}
                         disabled={selectedWishlistIds.length === 0}
                         className="inline-flex items-center gap-2 rounded border border-red-200 px-3 py-2 text-sm text-red-700 disabled:opacity-50"
                       >
@@ -1072,7 +1099,7 @@ export function Profile() {
                                 Chọn
                               </label>
                               <button
-                                onClick={() => removeWishlistItem(productId)}
+                                onClick={() => void removeWishlistItem(productId)}
                                 className="rounded-full bg-white/95 p-2 text-red-500 transition-colors hover:bg-red-50"
                                 aria-label="Bỏ khỏi yêu thích"
                               >
@@ -1297,6 +1324,37 @@ export function Profile() {
                 </form>
               </div>
             )}
+
+            {returnTarget && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                <form onSubmit={submitReturnRequest} className="w-full max-w-md space-y-4 rounded-lg bg-white p-6 shadow-xl dark:bg-neutral-900">
+                  <div>
+                    <h3 className="text-lg font-medium">Yêu cầu đổi trả</h3>
+                    <p className="mt-1 text-sm text-neutral-500">{returnTarget.item.product.name}</p>
+                  </div>
+                  <label className="block text-sm font-medium">
+                    Lý do
+                    <textarea required rows={4} value={returnReason} onChange={(event) => setReturnReason(event.target.value)} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" />
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Mong muốn xử lý
+                    <select value={returnSolution} onChange={(event) => setReturnSolution(event.target.value)} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950">
+                      <option value="refund">Hoàn tiền</option>
+                      <option value="exchange">Đổi sản phẩm</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Đường dẫn ảnh minh chứng
+                    <input required type="url" value={returnEvidenceUrl} onChange={(event) => setReturnEvidenceUrl(event.target.value)} placeholder="https://..." className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" />
+                  </label>
+                  <p className="text-xs text-neutral-500">Yêu cầu được tiếp nhận trong vòng 7 ngày kể từ khi giao hàng.</p>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={() => setReturnTarget(null)} className="flex-1 rounded border py-2">Hủy</button>
+                    <button type="submit" className="flex-1 rounded bg-neutral-900 py-2 text-white dark:bg-white dark:text-neutral-900">Gửi yêu cầu</button>
+                  </div>
+                </form>
+              </div>
+            )}
           </main>
         </div>
         {repurchaseNotice && (
@@ -1324,6 +1382,33 @@ function getOrderStatusLabel(status: string) {
   return labels[status] ?? status;
 }
 
+function toMockOrder(order: ApiOrder): MockOrder {
+  return {
+    id: `ORD-${order.order_id}`,
+    orderId: order.order_id,
+    date: new Date(order.created_at).toLocaleDateString("vi-VN"),
+    status: getOrderStatusLabel(order.status),
+    statusRaw: order.status,
+    total: Number(order.final_amount),
+    shippingAddress: order.shipping_address,
+    paymentMethod: order.payment_method,
+    paymentStatus: order.payment_status,
+    shippingFee: Number(order.shipping_fee),
+    discountAmount: Number(order.discount_amount),
+    shipment: order.shipment,
+    statusHistories: order.status_histories ?? [],
+    items: order.items.map((item) => ({
+      order_item_id: item.order_item_id,
+      product: item.product,
+      quantity: item.quantity,
+      size: item.size_snapshot || item.product.sizes[0] || "STD",
+      color: item.color_snapshot || item.product.colors[0] || "Mặc định",
+      price: Number(item.price),
+      subtotal: item.subtotal == null ? undefined : Number(item.subtotal),
+    })),
+  };
+}
+
 function OrderDetailModal({ order, onClose }: { order: MockOrder; onClose: () => void }) {
   const address = order.shippingAddress;
   const fullAddress = [address?.address_line, address?.ward, address?.district, address?.province]
@@ -1348,6 +1433,28 @@ function OrderDetailModal({ order, onClose }: { order: MockOrder; onClose: () =>
           <InfoBlock label="Số điện thoại" value={address?.receiver_phone} />
           <InfoBlock label="Địa chỉ giao hàng" value={fullAddress || undefined} />
           <InfoBlock label="Phương thức thanh toán" value={order.paymentMethod} />
+          <InfoBlock label="Trạng thái thanh toán" value={order.paymentStatus} />
+          <InfoBlock label="Đơn vị vận chuyển" value={order.shipment?.carrier_name} />
+          <InfoBlock label="Mã vận đơn" value={order.shipment?.tracking_code} />
+        </div>
+
+        <div className="mt-6">
+          <h4 className="mb-3 font-medium">Lịch sử trạng thái</h4>
+          <div className="space-y-3 border-l-2 border-neutral-200 pl-4 dark:border-neutral-700">
+            {order.statusHistories.length ? (
+              order.statusHistories.map((history) => (
+                <div key={history.history_id}>
+                  <div className="text-sm font-medium">{getOrderStatusLabel(history.to_status)}</div>
+                  <div className="text-xs text-neutral-500">
+                    {new Date(history.created_at).toLocaleString("vi-VN")}
+                    {history.note ? ` - ${history.note}` : ""}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-neutral-500">Đơn hàng đang ở trạng thái {order.status}.</div>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 space-y-3">

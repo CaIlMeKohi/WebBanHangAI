@@ -8,7 +8,7 @@ from products.application.inventory.dto import AdjustStockDTO
 from products.application.inventory.use_cases import AdjustVariantStockUseCase, ListLowStockUseCase, ListStockVariantsUseCase
 from products.domain.common.exceptions import BusinessRuleViolation, NotFoundError
 from products.infrastructure.django_orm.inventory_repository import DjangoOrmInventoryRepository
-from products.security.permissions import IsStaff
+from products.security.permissions import CanManageInventory
 from products.serializers import ProductVariantSerializer
 
 
@@ -17,7 +17,7 @@ def _inventory_repository() -> DjangoOrmInventoryRepository:
 
 
 class InventoryAdjustAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanManageInventory]
 
     def post(self, request):
         try:
@@ -34,14 +34,14 @@ class InventoryAdjustAPIView(APIView):
 
 
 class LowStockAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanManageInventory]
 
     def get(self, request):
         return Response(ListLowStockUseCase(_inventory_repository()).execute())
 
 
 class StockVariantListAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanManageInventory]
 
     def get(self, request):
         return Response(ListStockVariantsUseCase(_inventory_repository()).execute())

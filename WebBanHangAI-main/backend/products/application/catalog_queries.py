@@ -1,14 +1,36 @@
 from __future__ import annotations
 
-from django.db.models import F, Q, QuerySet
+from django.db.models import Avg, Count, Exists, F, OuterRef, Q, QuerySet
 from django.utils import timezone
 
-from products.models import Category, Coupon, Product
+from products.models import Category, Coupon, Product, ProductVariant
 
 
 def active_products_queryset() -> QuerySet[Product]:
+    available_variant = ProductVariant.objects.filter(
+        product_id=OuterRef('pk'),
+        is_active=True,
+        stock_quantity__gt=F('stock_reserved'),
+    )
     return (
-        Product.objects.filter(status='active')
+        Product.objects.filter(
+            status='active',
+            category__is_active=True,
+            brand__is_active=True,
+        )
+        .annotate(has_available_variant=Exists(available_variant))
+        .annotate(
+            approved_review_count=Count(
+                'reviews',
+                filter=Q(reviews__status='approved'),
+                distinct=True,
+            ),
+            approved_average_rating=Avg(
+                'reviews__rating',
+                filter=Q(reviews__status='approved'),
+            ),
+        )
+        .filter(has_available_variant=True)
         .select_related('category', 'brand')
         .prefetch_related('images', 'variants', 'category__children')
     )
@@ -60,15 +82,26 @@ def apply_catalog_filters(queryset: QuerySet[Product], params) -> QuerySet[Produ
             brand_filter |= Q(brand_id=int(brand))
         queryset = queryset.filter(brand_filter)
     if size:
-        queryset = queryset.filter(variants__size=size, variants__is_active=True)
+        queryset = queryset.filter(
+            variants__size=size,
+            variants__is_active=True,
+            variants__stock_quantity__gt=F('variants__stock_reserved'),
+        )
     if color:
-        queryset = queryset.filter(variants__color=color, variants__is_active=True)
+        queryset = queryset.filter(
+            variants__color=color,
+            variants__is_active=True,
+            variants__stock_quantity__gt=F('variants__stock_reserved'),
+        )
     for tag in tags:
         queryset = queryset.filter(tags__icontains=tag.strip().lower())
     if rating:
-        queryset = queryset.filter(average_rating__gte=rating)
+        queryset = queryset.filter(approved_average_rating__gte=rating)
     if in_stock in {'true', '1'}:
-        queryset = queryset.filter(variants__stock_quantity__gt=0)
+        queryset = queryset.filter(
+            variants__is_active=True,
+            variants__stock_quantity__gt=F('variants__stock_reserved'),
+        )
     if min_price:
         queryset = queryset.filter(base_price__gte=min_price)
     if max_price:

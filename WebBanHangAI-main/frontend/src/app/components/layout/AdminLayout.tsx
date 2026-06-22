@@ -3,10 +3,12 @@ import {
   BarChart3,
   Home,
   LogOut,
+  MessageSquare,
   Package,
   ReceiptText,
   Settings,
   TicketPercent,
+  Tags,
   Users,
 } from "lucide-react";
 import { useAdminAuth } from "../../context/AdminAuthContext";
@@ -58,6 +60,22 @@ export function AdminLayout() {
             >
               <Package className="w-5 h-5" />
               <span>Sản phẩm</span>
+            </Link>
+
+            <Link
+              to="/portal-admin/catalog"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-800 transition-colors"
+            >
+              <Tags className="w-5 h-5" />
+              <span>Danh mục / Brand / SKU</span>
+            </Link>
+
+            <Link
+              to="/portal-admin/reviews"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-800 transition-colors"
+            >
+              <MessageSquare className="w-5 h-5" />
+              <span>Duyệt đánh giá</span>
             </Link>
 
             <Link

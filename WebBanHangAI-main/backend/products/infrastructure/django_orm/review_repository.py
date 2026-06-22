@@ -27,7 +27,7 @@ class DjangoOrmReviewRepository:
             order_item=order_item,
             rating=rating,
             comment=payload.get('comment', ''),
-            status='approved',
+            status='approved',  # Tự động duyệt, không cần staff phê duyệt
             image_urls=json.dumps(image_urls, ensure_ascii=False),
         )
         self._create_review_images(review, image_assets)
@@ -77,7 +77,7 @@ class DjangoOrmReviewRepository:
         return None
 
     def _refresh_product_rating(self, product_id: int) -> None:
-        stats = Review.objects.filter(product_id=product_id, status='approved').aggregate(
+        stats = Review.objects.filter(product_id=product_id, status__in=['approved', 'pending']).aggregate(
             average=Avg('rating'),
             total=Count('review_id'),
         )

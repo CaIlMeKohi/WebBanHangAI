@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.db.models import Q
 from django.utils import timezone
@@ -49,13 +50,37 @@ class DjangoOrmUserRepository:
         if email and StoreUser.objects.exclude(user_id=user_id).filter(email=email).exists():
             raise BusinessRuleViolation('Email da duoc su dung')
         full_name = values.pop('full_name', None)
+        capability_fields = [
+            'can_process_orders',
+            'can_manage_inventory',
+            'can_handle_returns',
+            'can_moderate_reviews',
+        ]
+        capabilities = {
+            field: values.pop(field)
+            for field in capability_fields
+            if field in values
+        }
         for field, value in values.items():
             setattr(user, field, value)
         user.save(update_fields=[*values.keys(), 'updated_at'])
         if full_name is not None and hasattr(user, 'customer_profile'):
             user.customer_profile.full_name = full_name.strip()
             user.customer_profile.save(update_fields=['full_name', 'updated_at'])
-        return user, [*values.keys(), *(['full_name'] if full_name is not None else [])]
+        if user.role == 'staff' and capabilities:
+            profile, _ = StaffProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    'staff_code': f'NV{user.user_id:06d}',
+                    'full_name': full_name or user.email,
+                    'position': 'staff',
+                    'department': 'operations',
+                },
+            )
+            for field, value in capabilities.items():
+                setattr(profile, field, value)
+            profile.save(update_fields=[*capabilities.keys(), 'updated_at'])
+        return user, [*values.keys(), *capabilities.keys(), *(['full_name'] if full_name is not None else [])]
 
     def delete_user(self, actor, user_id: int):
         if actor.user_id == user_id:
@@ -100,6 +125,10 @@ class DjangoOrmUserRepository:
                 position=payload.get('position', 'staff'),
                 department=payload.get('department', 'operations'),
                 status='working',
+                can_process_orders=bool(payload.get('can_process_orders', True)),
+                can_manage_inventory=bool(payload.get('can_manage_inventory', True)),
+                can_handle_returns=bool(payload.get('can_handle_returns', True)),
+                can_moderate_reviews=bool(payload.get('can_moderate_reviews', True)),
             )
         return user
 
@@ -112,14 +141,35 @@ class DjangoOrmUserRepository:
         user = StoreUser.objects.filter(Q(email=username) | Q(phone=username)).first()
         ip_address = request.META.get('REMOTE_ADDR', '')
 
+        if user and user.account_status == 'locked' and user.locked_until and user.locked_until <= timezone.now():
+            user.account_status = 'active'
+            user.failed_login_count = 0
+            user.locked_until = None
+            user.save(update_fields=['account_status', 'failed_login_count', 'locked_until'])
         if not user or not user.is_active:
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='inactive_or_missing')
-            raise BusinessRuleViolation('Tai khoan khong hop le hoac da bi khoa')
+            if user and user.account_status == 'locked':
+                raise BusinessRuleViolation('Tài khoản đang bị khóa tạm thời. Vui lòng thử lại sau.')
+            raise BusinessRuleViolation('Tài khoản không tồn tại hoặc đã bị vô hiệu hóa.')
         if not check_password(password, user.password_hash):
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='bad_password')
-            raise BusinessRuleViolation('Invalid credentials')
+            user.failed_login_count += 1
+            update_fields = ['failed_login_count']
+            remaining = max(0, 5 - user.failed_login_count)
+            if user.failed_login_count >= 5:
+                user.account_status = 'locked'
+                user.locked_until = timezone.now() + timedelta(minutes=15)
+                update_fields.extend(['account_status', 'locked_until'])
+            user.save(update_fields=update_fields)
+            if remaining == 0:
+                raise BusinessRuleViolation('Bạn đã nhập sai 5 lần. Tài khoản bị khóa trong 15 phút.')
+            raise BusinessRuleViolation(f'Mật khẩu không đúng. Còn {remaining} lần thử.')
 
         LoginLog.objects.create(user=user, identifier=username, success=True, ip_address=ip_address)
+        user.failed_login_count = 0
+        user.locked_until = None
+        user.last_login_at = timezone.now()
+        user.save(update_fields=['failed_login_count', 'locked_until', 'last_login_at'])
         return {
             'user': StoreUserSerializer(user).data,
             'access': create_access_token(user, request),
@@ -178,11 +228,15 @@ class DjangoOrmUserRepository:
         )
         email_result = send_registration_otp(user.email, otp)
         if email_result.get('error') or email_result.get('skipped'):
-            user.delete()
-            raise EmailDeliveryError('Không thể gửi OTP đăng ký. Vui lòng kiểm tra cấu hình Gmail SMTP và thử lại.')
+            if not (settings.DEBUG and email_result.get('skipped')):
+                user.delete()
+                raise EmailDeliveryError('Không thể gửi OTP đăng ký. Vui lòng kiểm tra cấu hình Gmail SMTP và thử lại.')
         response_payload = {
             'detail': 'Mã OTP đã được gửi đến email đăng ký.',
             'email': user.email,
             'requires_otp': True,
         }
+        if settings.DEBUG and email_result.get('skipped'):
+            response_payload['dev_otp'] = otp
+            response_payload['detail'] = 'SMTP chưa cấu hình. Dùng OTP phát triển bên dưới.'
         return response_payload, 201

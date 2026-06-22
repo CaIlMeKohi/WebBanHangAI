@@ -10,6 +10,7 @@ from products.business.views import (
     AdminOrderDetailAPIView,
     AdminOrderListAPIView,
     AdminOrderStatusAPIView,
+    AdminOrderRefundCompleteAPIView,
     AdminUserLockAPIView,
     AdminUserUpdateDeleteAPIView,
     AdminUserUnlockAPIView,
@@ -47,6 +48,7 @@ from products.business.views import (
     StaffReviewListAPIView,
     VerifyEmailAPIView,
 )
+from products.interfaces.api.payment_views import MockPaymentConfirmAPIView
 from products.interfaces.api.auth_security_views import ResendRegistrationOTPAPIView, VerifyPasswordResetOTPAPIView, VerifyRegistrationOTPAPIView
 from products.views import AuthLoginAPIView, AuthRegisterAPIView, InventoryAdjustAPIView, LowStockAPIView, StockVariantListAPIView
 
@@ -92,6 +94,7 @@ product_review_patterns = [
 
 payment_patterns = [
     path('create', PaymentCreateAPIView.as_view()),
+    path('mock/confirm', MockPaymentConfirmAPIView.as_view()),
     path('<str:provider>/callback', PaymentCallbackAPIView.as_view()),
 ]
 
@@ -119,6 +122,7 @@ admin_patterns = [
     path('orders', AdminOrderListAPIView.as_view()),
     path('orders/<int:order_id>', AdminOrderDetailAPIView.as_view()),
     path('orders/<int:order_id>/status', AdminOrderStatusAPIView.as_view()),
+    path('orders/<int:order_id>/refund/complete', AdminOrderRefundCompleteAPIView.as_view()),
     path('inventory/low-stock', AdminLowStockAPIView.as_view()),
     path('inventory/low-stock-threshold', AdminLowStockThresholdAPIView.as_view()),
     path('reports/revenue', ReportsRevenueAPIView.as_view()),

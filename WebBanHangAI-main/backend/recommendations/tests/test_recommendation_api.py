@@ -36,13 +36,13 @@ class RecommendationApiTests(APITestCase):
         response = self.client.post(
             "/api/products/events/",
             {
-                "user_id": self.customer.customer_id,
                 "product_id": self.product.product_id,
                 "interaction_type": "view",
                 "session_id": "test-session",
                 "score": "1.0",
             },
             format="json",
+            **auth_headers(self.user),
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)

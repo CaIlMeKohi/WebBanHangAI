@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.db import connection
+from django.db.models.deletion import ProtectedError
 
 
 def _dictfetchall(cursor):
@@ -77,6 +78,18 @@ def refund_order(
 
 
 def hard_delete_product(product_id: int) -> dict:
+    if connection.vendor not in {'microsoft', 'mssql'}:
+        from products.models import Product
+
+        product = Product.objects.filter(product_id=product_id).first()
+        if product is None:
+            return {'deleted': False, 'reason': 'Product not found.'}
+        try:
+            product.delete()
+        except ProtectedError:
+            return {'deleted': False, 'reason': 'Product is referenced by business data.'}
+        return {'deleted': True}
+
     rows = call_sp('sp_HardDeleteProduct', [product_id])
     return rows[0] if rows else {'deleted': False, 'reason': 'Product could not be deleted.'}
 

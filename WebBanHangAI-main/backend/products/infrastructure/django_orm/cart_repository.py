@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.db import DatabaseError
+
 from products.application.cart_service import get_customer_cart_items, get_or_create_cart
 from products.domain.common.exceptions import BusinessRuleViolation, NotFoundError
 from products.infrastructure.stored_procedures import check_variant_stock
@@ -8,9 +10,13 @@ from products.models import CartItem, Product, UserInteraction
 
 def _available_stock(product, variant=None):
     if variant is not None:
-        stock = check_variant_stock(variant.variant_id, 1)
-        if stock is not None and 'available_stock' in stock:
-            return max(0, int(stock['available_stock']))
+        try:
+            stock = check_variant_stock(variant.variant_id, 1)
+            if stock is not None and 'available_stock' in stock:
+                return max(0, int(stock['available_stock']))
+        except DatabaseError:
+            # SQLite tests and minimal deployments do not install SQL Server SPs.
+            pass
         return max(0, variant.stock_quantity - variant.stock_reserved)
     return sum(max(0, item.stock_quantity - item.stock_reserved) for item in product.variants.all())
 
@@ -80,9 +86,12 @@ class DjangoOrmCartRepository:
             variant = variants.filter(variant_id=requested_variant_id).first()
             if variant is not None:
                 return variant
+            return None
         size = payload.get('size')
         color = payload.get('color')
-        for candidate in variants:
-            if (not size or candidate.size == size) and (not color or candidate.color == color):
-                return candidate
+        if size or color:
+            return variants.filter(
+                **({'size': size} if size else {}),
+                **({'color': color} if color else {}),
+            ).first()
         return variants.first()

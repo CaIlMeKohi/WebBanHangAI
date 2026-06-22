@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from django.db import DatabaseError, models, transaction
+from datetime import timedelta
+
+from django.conf import settings
+from django.db import DatabaseError, IntegrityError, models, transaction
 from django.utils import timezone
 
 from products.application.cart_service import get_customer_cart_items
 from products.domain.common.exceptions import BusinessRuleViolation, NotFoundError
 from products.infrastructure.django_orm.coupon_repository import _calculate_discount
-from products.infrastructure.stored_procedures import cancel_order_and_restore_stock, check_variant_stock, decrease_variant_stock, update_order_status
+from products.infrastructure.stored_procedures import check_variant_stock, decrease_variant_stock, update_order_status
 from products.models import Order
 from products.models import Address, AuditLog, CartItem, Coupon, CouponUsage, Notification, OrderItem, OrderStatusHistory, Payment, RecommendationLog, Shipment, StaffProfile, UserInteraction
 from products.services.email_service import send_order_confirmation
+from products.services.order_lifecycle import cancel_order_with_stock_restore, expire_pending_online_orders
 
 
 def _apply_order_filters(queryset, filters: dict):
@@ -26,6 +30,7 @@ def _apply_order_filters(queryset, filters: dict):
 
 class DjangoOrmOrderRepository:
     def list_customer_orders(self, customer):
+        expire_pending_online_orders()
         return (
             Order.objects.filter(user=customer)
             .prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants')
@@ -47,6 +52,7 @@ class DjangoOrmOrderRepository:
         )
 
     def list_staff_orders(self, filters: dict):
+        expire_pending_online_orders()
         queryset = (
             Order.objects.filter(status__in=[
                 'pending',
@@ -64,6 +70,7 @@ class DjangoOrmOrderRepository:
         return _apply_order_filters(queryset, filters)[:200]
 
     def list_admin_orders(self, filters: dict):
+        expire_pending_online_orders()
         queryset = (
             Order.objects.select_related('user', 'user__user', 'address')
             .prefetch_related('items', 'items__product', 'status_histories')
@@ -79,6 +86,19 @@ class DjangoOrmOrderRepository:
         )
 
     def create_customer_order(self, user, customer, payload):
+        payment_method = str(payload.payment_method or 'cod').strip().lower()
+        if payment_method not in {'cod', 'vnpay', 'momo', 'bank_transfer'}:
+            raise BusinessRuleViolation('Phuong thuc thanh toan khong hop le')
+
+        checkout_token = str(payload.checkout_token or '').strip()
+        if checkout_token:
+            existing_order = Order.objects.filter(checkout_token=checkout_token).first()
+            if existing_order is not None:
+                if existing_order.user_id != customer.customer_id:
+                    raise BusinessRuleViolation('Checkout token khong hop le')
+                existing_order._idempotent_replay = True
+                return existing_order
+
         cart_queryset = get_customer_cart_items(customer)
         if payload.cart_item_ids:
             cart_queryset = cart_queryset.filter(cart_item_id__in=payload.cart_item_ids)
@@ -104,25 +124,43 @@ class DjangoOrmOrderRepository:
         subtotal = sum(int(item.variant.price if item.variant_id else item.product.base_price) * item.quantity for item in cart_items)
         coupon, discount_amount = self._resolve_coupon(customer, payload.coupon_code, subtotal, cart_items)
         shipping_fee = 0 if subtotal > 1_000_000 else 30_000
-        order = Order.objects.create(
-            user=customer,
-            address=address,
-            order_code=f'ORD{timezone.now().strftime("%Y%m%d%H%M%S")}{customer.customer_id}',
-            receiver_name_snapshot=receiver_name,
-            receiver_phone_snapshot=receiver_phone,
-            address_line_snapshot=address.address_line,
-            ward_snapshot=address.ward,
-            district_snapshot=address.district,
-            province_snapshot=address.province,
-            postal_code_snapshot=address.postal_code,
-            total_amount=subtotal,
-            shipping_fee=shipping_fee,
-            discount_amount=discount_amount,
-            coupon=coupon,
-            final_amount=max(0, subtotal + shipping_fee - discount_amount),
-            payment_method=payload.payment_method,
-            payment_status='unpaid' if payload.payment_method == 'cod' else 'pending',
+        payment_expires_at = (
+            timezone.now() + timedelta(minutes=settings.PAYMENT_PENDING_TIMEOUT_MINUTES)
+            if payment_method != 'cod'
+            else None
         )
+        try:
+            with transaction.atomic():
+                order = Order.objects.create(
+                    user=customer,
+                    address=address,
+                    order_code=f'ORD{timezone.now().strftime("%Y%m%d%H%M%S")}{customer.customer_id}',
+                    receiver_name_snapshot=receiver_name,
+                    receiver_phone_snapshot=receiver_phone,
+                    address_line_snapshot=address.address_line,
+                    ward_snapshot=address.ward,
+                    district_snapshot=address.district,
+                    province_snapshot=address.province,
+                    postal_code_snapshot=address.postal_code,
+                    total_amount=subtotal,
+                    shipping_fee=shipping_fee,
+                    discount_amount=discount_amount,
+                    coupon=coupon,
+                    final_amount=max(0, subtotal + shipping_fee - discount_amount),
+                    payment_method=payment_method,
+                    payment_status='unpaid' if payment_method == 'cod' else 'pending',
+                    checkout_token=checkout_token or None,
+                    payment_expires_at=payment_expires_at,
+                )
+        except IntegrityError:
+            existing_order = Order.objects.filter(
+                checkout_token=checkout_token,
+                user=customer,
+            ).first()
+            if existing_order is None:
+                raise
+            existing_order._idempotent_replay = True
+            return existing_order
         for item in cart_items:
             price = int(item.variant.price if item.variant_id else item.product.base_price)
             OrderItem.objects.create(
@@ -150,11 +188,23 @@ class DjangoOrmOrderRepository:
                 converted_order__isnull=True,
             ).update(ordered_after_click=True, converted_order=order)
 
-        Payment.objects.create(order=order, amount=order.final_amount, payment_method=order.payment_method, status='pending')
+        Payment.objects.create(
+            order=order,
+            amount=order.final_amount,
+            payment_method=order.payment_method,
+            status='pending',
+            expires_at=payment_expires_at,
+        )
         if coupon:
             CouponUsage.objects.create(user=customer, coupon=coupon, order=order, discount_amount=discount_amount)
             Coupon.objects.filter(coupon_id=coupon.coupon_id).update(used_count=models.F('used_count') + 1)
         CartItem.objects.filter(cart_item_id__in=[item.cart_item_id for item in cart_items], cart__customer=customer).delete()
+        Notification.objects.create(
+            user=user,
+            title='Đặt hàng thành công',
+            content=f'Đơn hàng #{order.order_id} đã được tạo và đang chờ xác nhận.',
+            notification_type='order',
+        )
         send_order_confirmation(user.email, order.order_id, order.final_amount)
         return order
 
@@ -165,11 +215,13 @@ class DjangoOrmOrderRepository:
         if order.status not in {'pending', 'confirmed', 'processing'}:
             raise BusinessRuleViolation('Khong the huy don o trang thai hien tai')
         try:
-            cancel_order_and_restore_stock(order.order_id, user.user_id if user else None, payload.reason)
+            return cancel_order_with_stock_restore(
+                order,
+                actor=user,
+                reason=payload.reason,
+            )
         except DatabaseError as exc:
             raise BusinessRuleViolation('Khong the huy don va hoan kho') from exc
-        order.refresh_from_db()
-        return order
 
     def confirm_customer_order_received(self, user, customer, order_id: int):
         order = Order.objects.filter(order_id=order_id, user=customer).first()
@@ -224,11 +276,21 @@ class DjangoOrmOrderRepository:
             raise NotFoundError('Order not found')
         if payload.status not in transitions.get(order.status, set()):
             raise BusinessRuleViolation('Chuyen trang thai khong hop le')
+        if (
+            payload.status != 'cancelled'
+            and order.payment_method != 'cod'
+            and order.payment_status != 'paid'
+        ):
+            raise BusinessRuleViolation('Don thanh toan online chua duoc thanh toan')
         if payload.status == 'waiting_pickup' and not payload.carrier_name:
             raise BusinessRuleViolation('Can nhap don vi van chuyen khi giao hang')
         try:
             if payload.status == 'cancelled':
-                cancel_order_and_restore_stock(order.order_id, actor.user_id if actor else None, payload.note or 'Staff cancelled order')
+                return cancel_order_with_stock_restore(
+                    order,
+                    actor=actor,
+                    reason=payload.note or 'Staff cancelled order',
+                )
             else:
                 update_order_status(
                     order.order_id,
@@ -260,8 +322,11 @@ class DjangoOrmOrderRepository:
 
     def _available_stock(self, product, variant=None):
         if variant is not None:
-            stock = check_variant_stock(variant.variant_id, 1)
-            if stock is not None and 'available_stock' in stock:
-                return max(0, int(stock['available_stock']))
+            try:
+                stock = check_variant_stock(variant.variant_id, 1)
+                if stock is not None and 'available_stock' in stock:
+                    return max(0, int(stock['available_stock']))
+            except DatabaseError:
+                pass
             return max(0, variant.stock_quantity - variant.stock_reserved)
         return sum(max(0, item.stock_quantity - item.stock_reserved) for item in product.variants.all())

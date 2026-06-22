@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from products.application.customer_context import get_active_user, get_customer_for_user
+from products.application.customer_context import get_customer_for_user
 from products.application.orders.dto import CancelOrderDTO, OrderListFilterDTO, UpdateOrderStatusDTO
 from products.application.orders.use_cases import (
     CancelCustomerOrderUseCase,
@@ -19,7 +19,7 @@ from products.application.orders.use_cases import (
 )
 from products.domain.common.exceptions import BusinessRuleViolation, NotFoundError
 from products.infrastructure.django_orm.order_repository import DjangoOrmOrderRepository
-from products.security.permissions import IsAdmin, IsCustomer, IsStaff
+from products.security.permissions import CanProcessOrders, IsAdmin, IsCustomer
 from products.serializers import OrderSerializer
 from products.business.serializers import OrderDetailSerializer
 
@@ -28,40 +28,37 @@ def _order_repository() -> DjangoOrmOrderRepository:
     return DjangoOrmOrderRepository()
 
 
-def _get_user(request):
-    if getattr(getattr(request, 'user', None), 'user_id', None):
-        return request.user
-    user_id = request.query_params.get('user_id') or getattr(request, 'data', {}).get('user_id')
-    if not user_id:
-        return None
-    return get_active_user(user_id)
-
-
 def _get_customer(user):
     return get_customer_for_user(user)
 
 
 class CustomerOrderListAPIView(APIView):
+    permission_classes = [IsCustomer]
+
     def get(self, request):
-        customer = _get_customer(_get_user(request))
+        customer = _get_customer(request.user)
         if not customer:
             return Response([])
         orders = ListCustomerOrdersUseCase(_order_repository()).execute(customer)
-        return Response(OrderSerializer(orders, many=True).data)
+        return Response(OrderDetailSerializer(orders, many=True).data)
 
 
 class CustomerOrderAPIView(APIView):
+    permission_classes = [IsCustomer]
+
     def get(self, request, order_id):
-        customer = _get_customer(_get_user(request))
+        customer = _get_customer(request.user)
         order = GetCustomerOrderUseCase(_order_repository()).execute(customer, order_id)
         if order is None:
             return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(OrderSerializer(order).data)
+        return Response(OrderDetailSerializer(order).data)
 
 
 class CustomerOrderCancelAPIView(APIView):
+    permission_classes = [IsCustomer]
+
     def post(self, request, order_id):
-        user = _get_user(request)
+        user = request.user
         customer = _get_customer(user)
         try:
             order = CancelCustomerOrderUseCase(_order_repository()).execute(
@@ -107,7 +104,7 @@ class CustomerOrderDetailAPIView(APIView):
 
 
 class StaffOrderListAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanProcessOrders]
 
     def get(self, request):
         filters = OrderListFilterDTO.from_query_params(request.query_params)
@@ -116,7 +113,7 @@ class StaffOrderListAPIView(APIView):
 
 
 class StaffOrderStatusAPIView(APIView):
-    permission_classes = [IsStaff]
+    permission_classes = [CanProcessOrders]
 
     def put(self, request, order_id):
         try:

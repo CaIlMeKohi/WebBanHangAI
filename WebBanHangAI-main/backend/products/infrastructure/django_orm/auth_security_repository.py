@@ -10,7 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from products.domain.common.exceptions import BusinessRuleViolation, EmailDeliveryError
-from products.models import EmailVerificationToken, PasswordResetOTP, StoreUser, UserSession
+from products.models import EmailVerificationToken, Notification, PasswordResetOTP, StoreUser, UserSession
 from products.serializers import RegisterSerializer
 from products.services.email_service import send_password_reset_otp, send_registration_otp, send_verification_email
 
@@ -37,6 +37,12 @@ class DjangoOrmAuthSecurityRepository:
         with transaction.atomic():
             user.save(update_fields=['account_status', 'email_verified_at'])
             record.save(update_fields=['used_at'])
+            Notification.objects.create(
+                user=user,
+                title='Xác thực tài khoản thành công',
+                content='Tài khoản của bạn đã được kích hoạt.',
+                notification_type='account',
+            )
 
     def resend_registration_otp(self, email: str) -> dict:
         user = StoreUser.objects.filter(email=email, account_status='pending_verification').first()
@@ -49,11 +55,13 @@ class DjangoOrmAuthSecurityRepository:
         PasswordResetOTP.objects.create(user=user, otp_hash=make_password(otp), expires_at=timezone.now() + timedelta(minutes=10))
         result = send_registration_otp(user.email, otp)
         if result.get('error') or result.get('skipped'):
-            PasswordResetOTP.objects.filter(user=user, used_at__isnull=True).order_by('-created_at').first().delete()
-            raise EmailDeliveryError('Không thể gửi lại OTP. Vui lòng kiểm tra cấu hình Gmail SMTP và thử lại.')
+            if not (settings.DEBUG and result.get('skipped')):
+                PasswordResetOTP.objects.filter(user=user, used_at__isnull=True).order_by('-created_at').first().delete()
+                raise EmailDeliveryError('Không thể gửi lại OTP. Vui lòng kiểm tra cấu hình Gmail SMTP và thử lại.')
         payload = {'detail': 'Mã OTP mới đã được gửi đến email đăng ký.'}
         if settings.DEBUG and result.get('skipped'):
             payload['dev_otp'] = otp
+            payload['detail'] = 'SMTP chưa cấu hình. Dùng OTP phát triển bên dưới.'
         return payload
 
     def verify_email(self, token: str) -> None:
@@ -89,11 +97,13 @@ class DjangoOrmAuthSecurityRepository:
         record = PasswordResetOTP.objects.create(user=user, otp_hash=make_password(otp), expires_at=timezone.now() + timedelta(minutes=10))
         result = send_password_reset_otp(user.email, otp)
         if result.get('error') or result.get('skipped'):
-            record.delete()
-            raise EmailDeliveryError('Không thể gửi OTP. Vui lòng kiểm tra cấu hình Gmail SMTP và thử lại.')
+            if not (settings.DEBUG and result.get('skipped')):
+                record.delete()
+                raise EmailDeliveryError('Không thể gửi OTP. Vui lòng kiểm tra cấu hình Gmail SMTP và thử lại.')
         payload = {'detail': 'OTP đã được gửi nếu Gmail SMTP đã được cấu hình'}
         if settings.DEBUG and result.get('skipped'):
             payload['dev_otp'] = otp
+            payload['detail'] = 'SMTP chưa cấu hình. Dùng OTP phát triển bên dưới.'
         return payload
 
     def reset_password(self, payload: dict) -> None:

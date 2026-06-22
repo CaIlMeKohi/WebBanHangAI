@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.db.models import Avg, Count, Q
 from django.http import QueryDict
 
 from products.application.catalog.dto import ProductListQueryDTO
@@ -15,6 +16,17 @@ class DjangoOrmCatalogRepository:
     def get_product_detail(self, product_id: str | int):
         return (
             Product.objects.filter(status='active')
+            .annotate(
+                approved_review_count=Count(
+                    'reviews',
+                    filter=Q(reviews__status='approved'),
+                    distinct=True,
+                ),
+                approved_average_rating=Avg(
+                    'reviews__rating',
+                    filter=Q(reviews__status='approved'),
+                ),
+            )
             .select_related('category', 'brand')
             .prefetch_related('images', 'variants', 'category__children')
             .get(product_id=product_id)

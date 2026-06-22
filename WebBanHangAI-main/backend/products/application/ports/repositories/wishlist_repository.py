@@ -9,3 +9,6 @@ class WishlistRepository(Protocol):
 
     def add_item(self, customer: Any, product_id: Any) -> Any:
         ...
+
+    def delete_item(self, customer: Any, product_id: Any) -> bool:
+        ...

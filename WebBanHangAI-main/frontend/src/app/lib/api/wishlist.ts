@@ -1,5 +1,5 @@
 import type { Product } from "../../data/products";
-import { apiGet, apiPost } from "../apiClient";
+import { apiDelete, apiGet, apiPost } from "../apiClient";
 
 export interface ApiWishlistItem {
   wishlist_item_id: number;
@@ -9,15 +9,24 @@ export interface ApiWishlistItem {
 export async function fetchWishlist(
   userId: number,
 ): Promise<ApiWishlistItem[]> {
-  return apiGet<ApiWishlistItem[]>(`/products/wishlist/?user_id=${userId}`);
+  void userId;
+  return apiGet<ApiWishlistItem[]>(`/products/wishlist/`);
 }
 
 export async function addWishlistItem(
   userId: number,
   productId: number | string,
 ): Promise<ApiWishlistItem> {
+  void userId;
   return apiPost<ApiWishlistItem>(`/products/wishlist/`, {
-    user_id: userId,
     product_id: productId,
   });
+}
+
+export async function deleteWishlistItem(
+  userId: number,
+  productId: number | string,
+): Promise<void> {
+  void userId;
+  return apiDelete(`/products/wishlist/${productId}/`);
 }

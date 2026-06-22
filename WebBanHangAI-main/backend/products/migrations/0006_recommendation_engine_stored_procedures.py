@@ -178,6 +178,16 @@ END;
 """
 
 def install_recommendation_procedures(apps, schema_editor):
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM django_migrations
+            WHERE app = 'products' AND name = '0031_fix_low_stock_sp_default_threshold'
+            """
+        )
+        if not cursor.fetchone()[0]:
+            return
     batches = CREATE_RECOMMENDATION_PROCEDURES.strip().split('\nCREATE OR ALTER PROCEDURE ')
     with schema_editor.connection.cursor() as cursor:
         for index, batch in enumerate(batches):

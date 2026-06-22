@@ -14,12 +14,12 @@ class Migration(migrations.Migration):
                     sql=r"""
 IF COL_LENGTH('dbo.coupons', 'category_id') IS NULL
 BEGIN
-    ALTER TABLE dbo.coupons ADD category_id BIGINT NULL;
+    ALTER TABLE dbo.coupons ADD category_id INT NULL;
 END;
 
 IF COL_LENGTH('dbo.coupons', 'product_id') IS NULL
 BEGIN
-    ALTER TABLE dbo.coupons ADD product_id BIGINT NULL;
+    ALTER TABLE dbo.coupons ADD product_id INT NULL;
 END;
 
 IF NOT EXISTS (

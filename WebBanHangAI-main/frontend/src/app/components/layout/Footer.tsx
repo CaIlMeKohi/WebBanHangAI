@@ -49,10 +49,10 @@ export function Footer() {
               KẾT NỐI
             </h4>
             <div className="flex space-x-4 mb-4">
-              <a href="#" className="hover:text-white transition-colors"><Instagram className="w-5 h-5" /></a>
-              <a href="#" className="hover:text-white transition-colors"><Facebook className="w-5 h-5" /></a>
-              <a href="#" className="hover:text-white transition-colors"><Twitter className="w-5 h-5" /></a>
-              <a href="#" className="hover:text-white transition-colors"><Mail className="w-5 h-5" /></a>
+            <a href="https://www.instagram.com/" target="_blank" rel="noreferrer" className="hover:text-white transition-colors" aria-label="Instagram"><Instagram className="w-5 h-5" /></a>
+            <a href="https://www.facebook.com/" target="_blank" rel="noreferrer" className="hover:text-white transition-colors" aria-label="Facebook"><Facebook className="w-5 h-5" /></a>
+            <a href="https://twitter.com/" target="_blank" rel="noreferrer" className="hover:text-white transition-colors" aria-label="Twitter"><Twitter className="w-5 h-5" /></a>
+            <a href="mailto:support@fashionshop.local" className="hover:text-white transition-colors" aria-label="Email hỗ trợ"><Mail className="w-5 h-5" /></a>
             </div>
             <p className="text-sm mb-2">Nhận tin mới</p>
             <div className="flex">
@@ -72,9 +72,9 @@ export function Footer() {
           <div className="flex flex-col md:flex-row justify-between items-center text-sm">
             <p>&copy; 2026 BKQ. Bản quyền thuộc về chúng tôi.</p>
             <div className="flex space-x-6 mt-4 md:mt-0">
-              <a href="#" className="hover:text-white transition-colors">Chính sách bảo mật</a>
-              <a href="#" className="hover:text-white transition-colors">Điều khoản dịch vụ</a>
-              <a href="#" className="hover:text-white transition-colors">Cookies</a>
+          <Link to="/dang-hoan-thien?feature=privacy" className="hover:text-white transition-colors">Chính sách bảo mật</Link>
+          <Link to="/dang-hoan-thien?feature=terms" className="hover:text-white transition-colors">Điều khoản dịch vụ</Link>
+          <Link to="/dang-hoan-thien?feature=cookies" className="hover:text-white transition-colors">Cookies</Link>
             </div>
           </div>
         </div>

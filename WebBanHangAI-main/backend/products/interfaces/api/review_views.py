@@ -15,7 +15,7 @@ from products.application.reviews.use_cases import (
 )
 from products.domain.common.exceptions import BusinessRuleViolation, NotFoundError
 from products.infrastructure.django_orm.review_repository import DjangoOrmReviewRepository
-from products.security.permissions import IsAdmin, IsCustomer
+from products.security.permissions import CanModerateReviews, IsAdmin, IsCustomer
 
 
 def _review_repository() -> DjangoOrmReviewRepository:
@@ -52,14 +52,14 @@ class ProductReviewsAPIView(APIView):
 
 
 class StaffReviewListAPIView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [CanModerateReviews]
 
     def get(self, request):
         return Response(ListStaffReviewsUseCase(_review_repository()).execute(request.query_params.get('status')))
 
 
 class StaffReviewModerateAPIView(APIView):
-    permission_classes = [IsAdmin]
+    permission_classes = [CanModerateReviews]
 
     def put(self, request, review_id):
         try:

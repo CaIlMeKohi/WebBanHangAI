@@ -59,6 +59,9 @@ type ShipmentForm = {
   note: string;
 };
 
+type ReasonAction =
+  | { type: "reject-return"; id: number };
+
 type StockVariantOption = {
   variant_id: number | string;
   sku?: string;
@@ -102,6 +105,14 @@ const actionLabels: Record<OrderStatus, string> = {
   completed: "Hoàn thành",
   cancelled: "Hủy đơn",
 };
+
+function availableOrderActions(order: StaffOrder) {
+  const actions = nextStatuses[order.status] ?? [];
+  if (order.payment_method !== "cod" && order.payment_status !== "paid") {
+    return actions.filter((status) => status === "cancelled");
+  }
+  return actions;
+}
 
 function generateTrackingCode(orderId: number) {
   const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, "");
@@ -174,6 +185,10 @@ function StaffPortalContent() {
   const [shipmentForm, setShipmentForm] = useState<ShipmentForm>({ carrier_name: "", tracking_code: "", note: "" });
   const [shipmentError, setShipmentError] = useState("");
   const [isSavingShipment, setIsSavingShipment] = useState(false);
+  const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
+  const [reasonText, setReasonText] = useState("");
+  const [reasonError, setReasonError] = useState("");
+  const [isSavingReason, setIsSavingReason] = useState(false);
 
   async function load() {
     const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
@@ -257,11 +272,47 @@ function StaffPortalContent() {
   }
 
   async function updateReturn(returnId: number, status: string) {
+    if (status === "rejected") {
+      setReasonAction({ type: "reject-return", id: returnId });
+      setReasonText("");
+      setReasonError("");
+      return;
+    }
     const body: Record<string, string> = { status };
-    if (status === "rejected") body.reason = prompt("Lý do từ chối") ?? "";
-    await api(`/staff/returns/${returnId}/status`, { method: "PUT", body: JSON.stringify(body) });
-    setMessage("Đã cập nhật yêu cầu đổi trả");
-    await load();
+    try {
+      await api(`/staff/returns/${returnId}/status`, { method: "PUT", body: JSON.stringify(body) });
+      setMessage("Đã cập nhật yêu cầu đổi trả");
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể cập nhật yêu cầu đổi trả");
+    }
+  }
+
+
+  async function submitReasonAction(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reasonAction) return;
+    const reason = reasonText.trim();
+    if (!reason) {
+      setReasonError("Vui lòng nhập lý do.");
+      return;
+    }
+    setIsSavingReason(true);
+    setReasonError("");
+    try {
+      await api(`/staff/returns/${reasonAction.id}/status`, {
+        method: "PUT",
+        body: JSON.stringify({ status: "rejected", reason }),
+      });
+      setMessage("Đã từ chối yêu cầu đổi trả");
+      setReasonAction(null);
+      setReasonText("");
+      await load();
+    } catch (error) {
+      setReasonError(error instanceof Error ? error.message : "Không thể lưu lý do.");
+    } finally {
+      setIsSavingReason(false);
+    }
   }
 
   function openStockModal(action: StockAction) {
@@ -377,10 +428,13 @@ function StaffPortalContent() {
                     <td className="px-2 py-3">#{order.order_id}</td>
                     <td className="px-2 py-3">{Number(order.final_amount).toLocaleString("vi-VN")}đ</td>
                     <td className="px-2 py-3">{statusLabels[order.status] ?? order.status}</td>
-                    <td className="px-2 py-3">{order.payment_method}</td>
+                    <td className="px-2 py-3">
+                      <div>{order.payment_method}</div>
+                      <div className="text-xs text-neutral-500">{order.payment_status ?? "-"}</div>
+                    </td>
                     <td className="space-x-2 px-2 py-3">
                       <button className="rounded border px-2 py-1" onClick={() => setSelectedOrder(order)}>Chi tiết sản phẩm</button>
-                      {(nextStatuses[order.status] ?? []).map((status) => (
+                      {availableOrderActions(order).map((status) => (
                         <button key={status} className="rounded border px-2 py-1" onClick={() => updateOrder(order.order_id, status)}>
                           {actionLabels[status] ?? status}
                         </button>
@@ -401,14 +455,30 @@ function StaffPortalContent() {
               <div key={item.return_id} className="rounded border p-3 text-sm">
                 <b>#{item.return_id} - {item.status}</b>
                 <p>{item.reason}</p>
+                {item.images?.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {item.images.map((image: { image_id: number; image_url: string }) => (
+                      <a key={image.image_id} href={image.image_url} target="_blank" rel="noreferrer">
+                        <img src={image.image_url} alt="Minh chứng đổi trả" className="h-20 w-20 rounded border object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                )}
                 <div className="mt-2 space-x-2">
-                  {["approved", "rejected", "completed"].map((status) => (
+                  {(item.status === "pending"
+                    ? ["approved", "rejected"]
+                    : item.status === "approved"
+                      ? ["completed", "rejected"]
+                      : []
+                  ).map((status) => (
                     <button key={status} className="rounded border px-2 py-1" onClick={() => updateReturn(item.return_id, status)}>{status}</button>
                   ))}
                 </div>
               </div>
             ))}
           </Panel>
+
+
         </section>
 
         <Panel title="Cảnh báo tồn kho thấp">
@@ -456,7 +526,81 @@ function StaffPortalContent() {
           onSubmit={submitShipmentForm}
         />
       )}
+
+      {reasonAction && (
+        <ReasonModal
+          title="Từ chối yêu cầu đổi trả"
+          label="Lý do từ chối"
+          value={reasonText}
+          error={reasonError}
+          isSaving={isSavingReason}
+          onChange={setReasonText}
+          onClose={() => {
+            if (isSavingReason) return;
+            setReasonAction(null);
+            setReasonError("");
+          }}
+          onSubmit={submitReasonAction}
+        />
+      )}
     </main>
+  );
+}
+
+function ReasonModal({
+  title,
+  label,
+  value,
+  error,
+  isSaving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  label: string;
+  value: string;
+  error: string;
+  isSaving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
+      <form onSubmit={onSubmit} className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <label className="mt-4 block text-sm">
+          <span className="mb-1 block font-medium">{label}</span>
+          <textarea
+            autoFocus
+            required
+            maxLength={500}
+            rows={5}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            className="w-full resize-none rounded border px-3 py-2"
+          />
+        </label>
+        {error && (
+          <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={isSaving} className="rounded border px-4 py-2">
+            Hủy
+          </button>
+          <button
+            type="submit"
+            disabled={isSaving || !value.trim()}
+            className="rounded bg-neutral-950 px-4 py-2 text-white disabled:opacity-50"
+          >
+            {isSaving ? "Đang lưu..." : "Xác nhận"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

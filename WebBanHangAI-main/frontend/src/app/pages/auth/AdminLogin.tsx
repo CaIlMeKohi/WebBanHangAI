@@ -45,9 +45,12 @@ export function AdminLogin() {
       if (success) {
         // Redirect is centralized in the auth effect after API role is loaded.
       } else {
-        setError("Tên đăng nhập hoặc mật khẩu không chính xác");
+        setError("Không thể đăng nhập.");
         setPassword("");
       }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Không thể kết nối máy chủ.");
+      setPassword("");
     } finally {
       setIsLoading(false);
     }
@@ -126,9 +129,6 @@ export function AdminLogin() {
               </Link>
             </p>
             <p><Link to="/forgot-password" className="font-medium text-neutral-900 underline">Quên mật khẩu?</Link></p>
-            <p>Demo credentials:</p>
-            <p className="font-mono text-neutral-900">Admin: admin / 123</p>
-            <p className="font-mono text-neutral-900">User: user / 123</p>
           </div>
         </div>
       </div>

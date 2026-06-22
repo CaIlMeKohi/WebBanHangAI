@@ -49,6 +49,14 @@ export interface Product {
   createdAt?: string;
   brandName?: string | null;
   stockQuantity?: number;
+  variants?: Array<{
+    variant_id: number;
+    sku: string;
+    color: string;
+    size: string;
+    price: number;
+    available_stock: number;
+  }>;
 }
 
 export const products: Product[] = [

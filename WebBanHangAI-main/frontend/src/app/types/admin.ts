@@ -1,6 +1,6 @@
 import type { Product } from "../data/products";
 
-export interface AdminProduct extends Product {
+export interface AdminProduct extends Omit<Product, "variants"> {
   slug: string;
   base_price?: number;
   stock_quantity: number;

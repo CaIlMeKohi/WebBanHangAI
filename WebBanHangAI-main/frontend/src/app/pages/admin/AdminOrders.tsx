@@ -2,7 +2,13 @@ import { useEffect, useState, type ReactNode } from "react";
 import { History } from "lucide-react";
 
 import { AdminAuditHistoryModal } from "../../components/admin/AdminAuditHistoryModal";
-import { fetchAdminAuditLogs, fetchAdminOrders, type AdminProductHistoryItem, type ApiOrder } from "../../lib/api";
+import {
+  completeAdminOrderRefund,
+  fetchAdminAuditLogs,
+  fetchAdminOrders,
+  type AdminProductHistoryItem,
+  type ApiOrder,
+} from "../../lib/api";
 
 type OrderFilters = {
   status: string;
@@ -70,6 +76,8 @@ const paymentStatusLabels: Record<string, string> = {
   pending: "Chờ thanh toán",
   paid: "Đã thanh toán",
   failed: "Thanh toán thất bại",
+  expired: "Hết hạn thanh toán",
+  refund_pending: "Chờ hoàn tiền",
   refunded: "Đã hoàn tiền",
 };
 
@@ -105,6 +113,10 @@ export function AdminOrders() {
   const [historyItems, setHistoryItems] = useState<AdminProductHistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [refundOrder, setRefundOrder] = useState<AdminOrder | null>(null);
+  const [refundReference, setRefundReference] = useState("");
+  const [isSavingRefund, setIsSavingRefund] = useState(false);
+  const [refundError, setRefundError] = useState("");
 
   async function loadOrders() {
     setIsLoading(true);
@@ -132,6 +144,29 @@ export function AdminOrders() {
       setError(err instanceof Error ? err.message : "Không tải được lịch sử chỉnh sửa");
     } finally {
       setIsHistoryLoading(false);
+    }
+  }
+
+  async function submitRefund(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!refundOrder) return;
+    const reference = refundReference.trim();
+    if (!reference) {
+      setRefundError("Vui lòng nhập mã tham chiếu hoàn tiền.");
+      return;
+    }
+    setIsSavingRefund(true);
+    setRefundError("");
+    try {
+      await completeAdminOrderRefund(refundOrder.order_id, reference);
+      setRefundOrder(null);
+      setSelectedOrder(null);
+      setRefundReference("");
+      await loadOrders();
+    } catch (err) {
+      setRefundError(err instanceof Error ? err.message : "Không thể xác nhận hoàn tiền.");
+    } finally {
+      setIsSavingRefund(false);
     }
   }
 
@@ -203,7 +238,28 @@ export function AdminOrders() {
       </div>
 
       {selectedOrder && (
-        <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+        <OrderDetailModal
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onRefund={() => {
+            setRefundOrder(selectedOrder);
+            setRefundReference("");
+            setRefundError("");
+          }}
+        />
+      )}
+      {refundOrder && (
+        <RefundModal
+          order={refundOrder}
+          reference={refundReference}
+          error={refundError}
+          isSaving={isSavingRefund}
+          onChange={setRefundReference}
+          onClose={() => {
+            if (!isSavingRefund) setRefundOrder(null);
+          }}
+          onSubmit={submitRefund}
+        />
       )}
       {isHistoryOpen && (
         <AdminAuditHistoryModal
@@ -274,7 +330,15 @@ function DataTable<T extends object>({
   );
 }
 
-function OrderDetailModal({ order, onClose }: { order: AdminOrder; onClose: () => void }) {
+function OrderDetailModal({
+  order,
+  onClose,
+  onRefund,
+}: {
+  order: AdminOrder;
+  onClose: () => void;
+  onRefund: () => void;
+}) {
   const address = order.shipping_address;
   const customer = order.customer;
   const shipment = order.shipment;
@@ -391,10 +455,71 @@ function OrderDetailModal({ order, onClose }: { order: AdminOrder; onClose: () =
                 <span>Tổng tiền</span>
                 <span>{formatMoney(order.final_amount)}</span>
               </div>
+              {order.payment_status === "refund_pending" && (
+                <button
+                  type="button"
+                  onClick={onRefund}
+                  className="mt-4 w-full rounded bg-neutral-950 px-4 py-2 text-sm font-medium text-white"
+                >
+                  Xác nhận đã hoàn tiền
+                </button>
+              )}
             </InfoCard>
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function RefundModal({
+  order,
+  reference,
+  error,
+  isSaving,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  order: AdminOrder;
+  reference: string;
+  error: string;
+  isSaving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4">
+      <form onSubmit={onSubmit} className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+        <h2 className="text-lg font-semibold">Xác nhận hoàn tiền đơn #{order.order_id}</h2>
+        <p className="mt-2 text-sm text-neutral-600">
+          Chỉ xác nhận sau khi đã hoàn tiền bên ngoài hệ thống. Mã tham chiếu sẽ được lưu để đối soát.
+        </p>
+        <label className="mt-4 block text-sm font-medium">
+          Mã tham chiếu hoàn tiền
+          <input
+            autoFocus
+            required
+            value={reference}
+            onChange={(event) => onChange(event.target.value)}
+            className="mt-2 w-full rounded border px-3 py-2"
+          />
+        </label>
+        {error && <div className="mt-3 rounded bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={isSaving} className="rounded border px-4 py-2">
+            Hủy
+          </button>
+          <button
+            type="submit"
+            disabled={isSaving || !reference.trim()}
+            className="rounded bg-neutral-950 px-4 py-2 text-white disabled:opacity-50"
+          >
+            {isSaving ? "Đang lưu..." : "Xác nhận"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

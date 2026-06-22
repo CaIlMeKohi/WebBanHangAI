@@ -17,6 +17,10 @@ type AdminUser = {
   account_status: AccountStatus;
   must_change_password?: boolean;
   created_at?: string;
+  can_process_orders?: boolean;
+  can_manage_inventory?: boolean;
+  can_handle_returns?: boolean;
+  can_moderate_reviews?: boolean;
 };
 
 type AccountForm = {
@@ -25,6 +29,10 @@ type AccountForm = {
   role: "customer" | "staff" | "admin";
   account_status: AccountStatus;
   password: string;
+  can_process_orders: boolean;
+  can_manage_inventory: boolean;
+  can_handle_returns: boolean;
+  can_moderate_reviews: boolean;
 };
 
 function authHeaders(): HeadersInit {
@@ -68,6 +76,10 @@ const emptyForm: AccountForm = {
   role: "staff",
   account_status: "active",
   password: "",
+  can_process_orders: true,
+  can_manage_inventory: true,
+  can_handle_returns: true,
+  can_moderate_reviews: true,
 };
 
 export function AdminAccounts() {
@@ -117,6 +129,10 @@ export function AdminAccounts() {
       role: user.role === "all" ? "customer" : user.role,
       account_status: user.account_status,
       password: "",
+      can_process_orders: user.can_process_orders ?? true,
+      can_manage_inventory: user.can_manage_inventory ?? true,
+      can_handle_returns: user.can_handle_returns ?? true,
+      can_moderate_reviews: user.can_moderate_reviews ?? true,
     });
     setFormMode("edit");
     setModalError("");
@@ -144,6 +160,10 @@ export function AdminAccounts() {
             password: form.password,
             role: form.role === "admin" ? "admin" : "staff",
             full_name: form.email,
+            can_process_orders: form.can_process_orders,
+            can_manage_inventory: form.can_manage_inventory,
+            can_handle_returns: form.can_handle_returns,
+            can_moderate_reviews: form.can_moderate_reviews,
           }),
         });
       } else if (formMode === "edit" && selectedUser) {
@@ -154,6 +174,10 @@ export function AdminAccounts() {
             phone: form.phone,
             role: form.role,
             account_status: form.account_status,
+            can_process_orders: form.can_process_orders,
+            can_manage_inventory: form.can_manage_inventory,
+            can_handle_returns: form.can_handle_returns,
+            can_moderate_reviews: form.can_moderate_reviews,
           }),
         });
       }
@@ -342,6 +366,28 @@ export function AdminAccounts() {
                 </div>
                 <small className="block text-neutral-500">Tối thiểu 12 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt.</small>
               </label>
+            )}
+            {form.role === "staff" && (
+              <fieldset className="rounded border p-3">
+                <legend className="px-1 text-sm font-medium">Quyền nhân viên</legend>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {[
+                    ["can_process_orders", "Xử lý đơn hàng"],
+                    ["can_manage_inventory", "Quản lý kho"],
+                    ["can_handle_returns", "Xử lý đổi trả"],
+                    ["can_moderate_reviews", "Duyệt đánh giá"],
+                  ].map(([field, label]) => (
+                    <label key={field} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(form[field as keyof AccountForm])}
+                        onChange={(event) => setForm({ ...form, [field]: event.target.checked })}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
             )}
             <div className="flex justify-end gap-2">
               <button type="button" className="rounded border px-4 py-2" onClick={() => setFormMode(null)}>Hủy</button>

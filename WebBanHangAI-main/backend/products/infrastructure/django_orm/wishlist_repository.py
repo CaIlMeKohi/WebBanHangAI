@@ -22,3 +22,10 @@ class DjangoOrmWishlistRepository:
         if created:
             UserInteraction.objects.create(user=customer, product=product, interaction_type='wishlist_add', score=2.5)
         return item
+
+    def delete_item(self, customer, product_id):
+        deleted, _ = WishlistItem.objects.filter(
+            user=customer,
+            product_id=product_id,
+        ).delete()
+        return bool(deleted)

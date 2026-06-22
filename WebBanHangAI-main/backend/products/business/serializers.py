@@ -52,6 +52,9 @@ class ReturnStatusHistorySerializer(serializers.ModelSerializer):
 
 
 class ReturnRequestSerializer(serializers.ModelSerializer):
+    images = ReturnRequestImageSerializer(many=True, read_only=True)
+    status_histories = ReturnStatusHistorySerializer(many=True, read_only=True)
+
     class Meta:
         model = ReturnRequest
         fields = [
@@ -67,6 +70,8 @@ class ReturnRequestSerializer(serializers.ModelSerializer):
             'processed_at',
             'created_at',
             'evidence_image_urls',
+            'images',
+            'status_histories',
         ]
         read_only_fields = ['return_id', 'user', 'status', 'reject_reason', 'processed_by', 'processed_at', 'created_at', 'updated_at']
 
@@ -104,9 +109,35 @@ class AdminLowStockThresholdSerializer(serializers.Serializer):
 
 
 class AdminUserSerializer(StoreUserSerializer):
+    can_process_orders = serializers.SerializerMethodField()
+    can_manage_inventory = serializers.SerializerMethodField()
+    can_handle_returns = serializers.SerializerMethodField()
+    can_moderate_reviews = serializers.SerializerMethodField()
+
+    def _capability(self, obj, field):
+        profile = getattr(obj, 'staff_profile', None)
+        return bool(profile and getattr(profile, field, False))
+
+    def get_can_process_orders(self, obj):
+        return self._capability(obj, 'can_process_orders')
+
+    def get_can_manage_inventory(self, obj):
+        return self._capability(obj, 'can_manage_inventory')
+
+    def get_can_handle_returns(self, obj):
+        return self._capability(obj, 'can_handle_returns')
+
+    def get_can_moderate_reviews(self, obj):
+        return self._capability(obj, 'can_moderate_reviews')
+
     class Meta(StoreUserSerializer.Meta):
         model = StoreUser
-        fields = ['user_id', 'username', 'full_name', 'email', 'phone', 'role', 'is_active', 'account_status', 'must_change_password', 'created_at']
+        fields = [
+            'user_id', 'username', 'full_name', 'email', 'phone', 'role',
+            'is_active', 'account_status', 'must_change_password', 'created_at',
+            'can_process_orders', 'can_manage_inventory', 'can_handle_returns',
+            'can_moderate_reviews',
+        ]
         read_only_fields = ['user_id', 'created_at']
 
 
@@ -119,6 +150,10 @@ class AdminUserUpdateSerializer(serializers.Serializer):
         required=False,
     )
     full_name = serializers.CharField(max_length=255, required=False)
+    can_process_orders = serializers.BooleanField(required=False)
+    can_manage_inventory = serializers.BooleanField(required=False)
+    can_handle_returns = serializers.BooleanField(required=False)
+    can_moderate_reviews = serializers.BooleanField(required=False)
 
     def validate_email(self, value):
         return value.strip().lower()

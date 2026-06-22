@@ -99,3 +99,12 @@ export async function updateAdminOrderStatus(
 ): Promise<ApiOrder> {
   return apiPut<ApiOrder>(`/admin/orders/${orderId}/status`, data);
 }
+
+export async function completeAdminOrderRefund(
+  orderId: number,
+  refundReference: string,
+): Promise<ApiOrder> {
+  return apiPost<ApiOrder>(`/admin/orders/${orderId}/refund/complete`, {
+    refund_reference: refundReference,
+  });
+}

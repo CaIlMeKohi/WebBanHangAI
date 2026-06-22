@@ -4,9 +4,14 @@ import { Heart, ShoppingBag, Star } from "lucide-react";
 
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import type { Product } from "../../data/products";
-import { addCartItem, addWishlistItem, recordRecommendationClick } from "../../lib/api";
+import {
+  addCartItem,
+  addWishlistItem,
+  deleteWishlistItem,
+  recordRecommendationClick,
+} from "../../lib/api";
 import { dispatchCartAddedNotice } from "../../lib/cartNotice";
-import { CART_UPDATED_EVENT, addStoredCartItem } from "../../lib/cartStorage";
+import { CART_UPDATED_EVENT } from "../../lib/cartStorage";
 import { formatCurrency } from "../../lib/productPresentation";
 import {
   addStoredWishlistId,
@@ -22,6 +27,7 @@ interface ProductCardProps {
 
 export function ProductCard({ product, isRecommendation = false }: ProductCardProps) {
   const [isLiked, setIsLiked] = useState(false);
+  const [actionError, setActionError] = useState("");
   const { userId } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -48,41 +54,59 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
   }, [product.id]);
 
   const handleQuickAdd = async () => {
-    const size = product.sizes[0] ?? "STD";
-    const color = product.colors[0] ?? "Mặc định";
+    const variant = product.variants?.find((item) => item.available_stock > 0);
+    const size = variant?.size ?? product.sizes[0] ?? "STD";
+    const color = variant?.color ?? product.colors[0] ?? "Mặc định";
 
     if (!userId) {
       redirectToLogin();
       return;
     }
 
+    setActionError("");
     try {
       await addCartItem({
         user_id: userId,
         product_id: product.id,
+        variant_id: variant?.variant_id,
         quantity: 1,
         size,
         color,
       });
-    } catch {
-      addStoredCartItem({ id: String(product.id), quantity: 1, size, color });
+      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+      dispatchCartAddedNotice();
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Không thể thêm sản phẩm vào giỏ hàng.",
+      );
     }
-
-    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
-    dispatchCartAddedNotice();
   };
 
-  const handleWishlist = () => {
+  const handleWishlist = async () => {
     if (userId) {
+      setActionError("");
       if (isLiked) {
-        removeStoredWishlistId(String(product.id));
-        setIsLiked(false);
+        try {
+          await deleteWishlistItem(userId, product.id);
+          removeStoredWishlistId(String(product.id));
+          setIsLiked(false);
+        } catch (error) {
+          setActionError(
+            error instanceof Error ? error.message : "Không thể bỏ sản phẩm yêu thích.",
+          );
+        }
         return;
       }
 
-      addStoredWishlistId(String(product.id));
-      setIsLiked(true);
-      void addWishlistItem(userId, product.id).catch(() => undefined);
+      try {
+        await addWishlistItem(userId, product.id);
+        addStoredWishlistId(String(product.id));
+        setIsLiked(true);
+      } catch (error) {
+        setActionError(
+          error instanceof Error ? error.message : "Không thể thêm sản phẩm yêu thích.",
+        );
+      }
       return;
     }
 
@@ -123,7 +147,7 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            handleWishlist();
+            void handleWishlist();
           }}
           className="absolute right-3 top-3 rounded-full bg-white/95 p-2 opacity-0 shadow-sm transition-all duration-200 group-hover:opacity-100 hover:scale-105"
           aria-label="Thêm vào yêu thích"
@@ -184,6 +208,7 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
             </span>
           )}
         </div>
+        {actionError && <p className="text-xs text-red-600">{actionError}</p>}
 
       </div>
     </Link>

@@ -20,6 +20,8 @@ import { AdminAccounts } from "./pages/admin/AdminAccounts";
 import { AdminCoupons } from "./pages/admin/AdminCoupons";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminOrders } from "./pages/admin/AdminOrders";
+import { AdminCatalog } from "./pages/admin/AdminCatalog";
+import { AdminReviews } from "./pages/admin/AdminReviews";
 import { PaymentQr } from "./pages/payment/PaymentQr";
 import { MockPaymentGateway } from "./pages/payment/MockPaymentGateway";
 import { RouteError } from "./pages/RouteError";
@@ -112,6 +114,10 @@ export const router = createBrowserRouter([
         Component: AdminProductsRoute,
       },
       {
+        path: "catalog",
+        Component: AdminCatalog,
+      },
+      {
         path: "operations",
         Component: AdminOperations,
       },
@@ -122,6 +128,10 @@ export const router = createBrowserRouter([
       {
         path: "orders",
         Component: AdminOrders,
+      },
+      {
+        path: "reviews",
+        Component: AdminReviews,
       },
       {
         path: "coupons",
