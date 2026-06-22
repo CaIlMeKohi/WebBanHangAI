@@ -1,0 +1,9 @@
+asgiref==3.11.1
+Django==5.2.6
+django-cors-headers==4.7.0
+djangorestframework==3.16.1
+mssql-django==1.7
+pyodbc==5.2.0
+pytz==2026.2
+sqlparse==0.5.5
+tzdata==2026.2

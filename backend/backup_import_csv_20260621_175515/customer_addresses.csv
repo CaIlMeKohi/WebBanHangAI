@@ -1,0 +1,7 @@
+﻿"address_id","customer_id","receiver_name","receiver_phone","address_line","ward","district","province","postal_code","is_default","created_at","updated_at"
+"1","11","Address User","0901234999","123 Test","Ward","District","City","","True","5/30/2026 4:34:42 AM","5/30/2026 4:34:42 AM"
+"2","12","Flow Test","0936403240","123 Test","Phuong 1","Quan 1","TP HCM","","True","5/30/2026 4:37:37 AM","5/30/2026 4:37:37 AM"
+"3","14","Khach hang demo","0912345678","123 Nguyen Trai","Phuong 1","Quan 1","TP. Ho Chi Minh","","True","5/30/2026 4:44:58 AM","5/30/2026 4:46:42 AM"
+"6","17","Thanh Khôi","456456456","số 2 Nguyễn Nguyễn","Nguyễn","Nguyễn","HCM","","True","5/31/2026 3:03:06 PM","5/31/2026 3:03:06 PM"
+"7","18","Thanh Khôi","085846122112","1 ngõ a","b","c","hcm","","True","5/31/2026 3:48:32 PM","5/31/2026 3:48:32 PM"
+"8","19","Thanh Khôi","123123321321","số 1 ngõ ABC","ÂBC","ABC","HCM","","True","5/31/2026 4:41:38 PM","5/31/2026 4:41:38 PM"
