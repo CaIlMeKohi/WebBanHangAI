@@ -1,5 +1,6 @@
 import { useNavigate, useSearchParams } from "react-router";
 import { CheckCircle2 } from "lucide-react";
+
 import { confirmMockPayment } from "../../lib/api";
 
 export function MockPaymentGateway() {

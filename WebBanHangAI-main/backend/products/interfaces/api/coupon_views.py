@@ -30,6 +30,24 @@ def _get_customer(user):
 
 
 class ApplyCouponAPIView(APIView):
+    def get(self, request):
+        customer = _get_customer(_get_user(request))
+        if not customer:
+            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        raw_ids = request.query_params.get('cart_item_ids', '').strip()
+        cart_item_ids = [int(item_id) for item_id in raw_ids.split(',') if item_id.strip().isdigit()] or None
+        results = _coupon_repository().list_available_for_cart(customer, cart_item_ids)
+        return Response([
+            {
+                'coupon': CouponSerializer(result['coupon']).data,
+                'subtotal': result['subtotal'],
+                'discount_amount': result['discount_amount'],
+                'final_amount': result['final_amount'],
+            }
+            for result in results
+        ])
+
     def post(self, request):
         customer = _get_customer(_get_user(request))
         if not customer:

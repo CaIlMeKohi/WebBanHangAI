@@ -12,16 +12,17 @@ import {
 } from "lucide-react";
 
 import {
-  confirmMockPayment,
   createOrder,
   deleteCartItem,
   applyCouponToCart,
+  fetchAvailableCouponsForCart,
   fetchAddresses,
   fetchCart,
   fetchProductById,
   updateCartItem,
   type ApiAddress,
   type ApiCartItem,
+  type ApiCartCouponOption,
 } from "../../lib/api";
 import {
   CART_UPDATED_EVENT,
@@ -47,6 +48,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
   const [couponCode, setCouponCode] = useState("");
   const [discountAmount, setDiscountAmount] = useState(0);
   const [couponMessage, setCouponMessage] = useState("");
+  const [availableCoupons, setAvailableCoupons] = useState<ApiCartCouponOption[]>([]);
   const [paidOrder, setPaidOrder] = useState<{
     orderId: number;
     amount: number;
@@ -214,6 +216,9 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
     setReceiverPhone((current) => current || selectedAddress.phone);
     setPaymentMethod("cod");
     setPaidOrder(null);
+    setCouponCode("");
+    setDiscountAmount(0);
+    setCouponMessage("");
     setIsCheckoutOpen(true);
   }
 
@@ -229,7 +234,11 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
   async function applyCoupon() {
     setCouponMessage("");
     setDiscountAmount(0);
-    if (!userId || !couponCode.trim()) return;
+    if (!userId) return;
+    if (!couponCode.trim()) {
+      setCouponMessage("Không sử dụng coupon.");
+      return;
+    }
     try {
       const result = await applyCouponToCart({
         user_id: userId,
@@ -242,6 +251,30 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
       setCouponMessage(err instanceof Error ? err.message : "Coupon không hợp lệ.");
     }
   }
+
+  useEffect(() => {
+    if (!isCheckoutOpen || !userId || selectedIds.length === 0) return;
+
+    let isMounted = true;
+    const activeUserId = userId;
+    async function loadAvailableCoupons() {
+      try {
+        const results = await fetchAvailableCouponsForCart(activeUserId, selectedIds);
+        if (isMounted) {
+          setAvailableCoupons(results);
+        }
+      } catch {
+        if (isMounted) {
+          setAvailableCoupons([]);
+        }
+      }
+    }
+
+    void loadAvailableCoupons();
+    return () => {
+      isMounted = false;
+    };
+  }, [isCheckoutOpen, selectedIds, userId]);
 
   async function submitCheckout() {
     setError("");
@@ -274,28 +307,6 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Không thể thanh toán đơn hàng.",
-      );
-    }
-  }
-
-  async function confirmBankPayment() {
-    if (!paidOrder) return;
-    setError("");
-    try {
-      await confirmMockPayment(paidOrder.orderId);
-      const ids = [...selectedIds];
-      setItems((current) =>
-        current.filter((item) => !ids.includes(item.cart_item_id)),
-      );
-      setSelectedIds([]);
-      setPaidOrder(null);
-      setIsCheckoutOpen(false);
-      removeLocalItemsById(ids);
-      window.dispatchEvent(new Event(CART_UPDATED_EVENT));
-      navigate("/profile?tab=orders");
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Không thể xác nhận thanh toán.",
       );
     }
   }
@@ -502,6 +513,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
           couponCode={couponCode}
           discountAmount={discountAmount}
           couponMessage={couponMessage}
+          availableCoupons={availableCoupons}
           setPaymentMethod={setPaymentMethod}
           setReceiverName={setReceiverName}
           setReceiverPhone={setReceiverPhone}
@@ -515,7 +527,6 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
             setPaidOrder(null);
             navigate("/profile?tab=orders");
           }}
-          onBankPaid={() => void confirmBankPayment()}
         />
       )}
     </div>
@@ -534,6 +545,7 @@ function CheckoutModal({
   couponCode,
   discountAmount,
   couponMessage,
+  availableCoupons,
   setPaymentMethod,
   setReceiverName,
   setReceiverPhone,
@@ -543,7 +555,6 @@ function CheckoutModal({
   onClose,
   onSubmit,
   onReturn,
-  onBankPaid,
 }: {
   amount: number;
   error: string;
@@ -556,6 +567,7 @@ function CheckoutModal({
   couponCode: string;
   discountAmount: number;
   couponMessage: string;
+  availableCoupons: ApiCartCouponOption[];
   setPaymentMethod: (method: PaymentMethod) => void;
   setReceiverName: (value: string) => void;
   setReceiverPhone: (value: string) => void;
@@ -565,7 +577,6 @@ function CheckoutModal({
   onClose: () => void;
   onSubmit: () => void;
   onReturn: () => void;
-  onBankPaid: () => void;
 }) {
   const returnTo =
     typeof window !== "undefined"
@@ -635,17 +646,39 @@ function CheckoutModal({
 
             <div className="mb-4">
               <div className="mb-2 text-sm font-medium">Mã giảm giá</div>
-              <div className="flex gap-2">
-                <input
-                  className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm uppercase text-neutral-950 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-950 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white dark:placeholder:text-neutral-500 dark:focus:border-white"
+              <div className="space-y-2">
+                <select
+                  className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none transition-colors focus:border-neutral-950 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white dark:focus:border-white"
                   value={couponCode}
                   onChange={(event) => setCouponCode(event.target.value)}
-                  placeholder="Nhập mã coupon"
+                >
+                  <option value="">Không dùng coupon</option>
+                  {availableCoupons.map((item) => (
+                    <option key={item.coupon.coupon_id} value={item.coupon.code}>
+                      {item.coupon.code}
+                      {item.coupon.name ? ` - ${item.coupon.name}` : ""}
+                      {` - giảm ${item.discount_amount.toLocaleString("vi-VN")} VND`}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  list="available-cart-coupons"
+                  className="min-w-0 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm uppercase text-neutral-950 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-950 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white dark:placeholder:text-neutral-500 dark:focus:border-white"
+                  value={couponCode}
+                  onChange={(event) => setCouponCode(event.target.value.toUpperCase())}
+                  placeholder="Nhập hoặc chọn mã coupon"
                 />
+                <datalist id="available-cart-coupons">
+                  {availableCoupons.map((item) => (
+                    <option key={item.coupon.coupon_id} value={item.coupon.code}>
+                      {item.coupon.name || item.coupon.code}
+                    </option>
+                  ))}
+                </datalist>
                 <button
                   type="button"
                   onClick={onApplyCoupon}
-                  className="rounded-lg border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-950 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:text-white dark:hover:bg-neutral-900"
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-950 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:text-white dark:hover:bg-neutral-900"
                 >
                   Áp dụng
                 </button>
@@ -725,12 +758,6 @@ function CheckoutModal({
             >
               Mở trang thanh toán
             </a>
-            <button
-              onClick={onBankPaid}
-              className="mt-3 w-full rounded-xl bg-neutral-950 py-3 font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
-            >
-              Tôi đã thanh toán
-            </button>
           </div>
         )}
       </div>

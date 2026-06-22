@@ -46,6 +46,13 @@ export interface ApiCoupon {
   is_active: boolean;
 }
 
+export interface ApiCartCouponOption {
+  coupon: ApiCoupon;
+  subtotal: number;
+  discount_amount: number;
+  final_amount: number;
+}
+
 export async function fetchCart(userId: number): Promise<ApiCartItem[]> {
   return apiGet<ApiCartItem[]>(`/products/cart/?user_id=${userId}`);
 }
@@ -126,4 +133,18 @@ export async function applyCouponToCart(data: {
     discount_amount: number;
     final_amount: number;
   }>(`/products/cart/apply-coupon/`, data);
+}
+
+export async function fetchAvailableCouponsForCart(
+  userId: number,
+  cartItemIds?: number[],
+): Promise<ApiCartCouponOption[]> {
+  const params = new URLSearchParams();
+  params.set("user_id", String(userId));
+  if (cartItemIds?.length) {
+    params.set("cart_item_ids", cartItemIds.join(","));
+  }
+  return apiGet<ApiCartCouponOption[]>(
+    `/products/cart/apply-coupon/?${params.toString()}`,
+  );
 }

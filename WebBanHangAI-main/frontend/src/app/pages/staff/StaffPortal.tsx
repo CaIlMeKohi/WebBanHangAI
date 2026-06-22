@@ -14,6 +14,7 @@ import {
 import { usePortalLightTheme } from "../../lib/usePortalLightTheme";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
+const STAFF_API_BASE = "";
 
 type OrderStatus = "pending" | "confirmed" | "processing" | "waiting_pickup" | "shipped" | "delivered" | "completed" | "cancelled";
 
@@ -170,7 +171,6 @@ function StaffPortalContent() {
   const { logout } = useAdminAuth();
   const [activePortalTab, setActivePortalTab] = useState<"orders" | "products">("orders");
   const [orders, setOrders] = useState<StaffOrder[]>([]);
-  const [returns, setReturns] = useState<any[]>([]);
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [stockVariants, setStockVariants] = useState<StockVariantOption[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<StaffOrder | null>(null);
@@ -200,14 +200,12 @@ function StaffPortalContent() {
   async function load() {
     const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
     try {
-      const [nextOrders, nextReturns, nextLowStock, nextStockVariants] = await Promise.all([
-        api<StaffOrder[]>(`/staff/orders?${params.toString()}`),
-        api<any[]>("/staff/returns"),
-        api<any[]>("/staff/inventory/low-stock"),
-        api<StockVariantOption[]>("/staff/inventory/variants"),
+      const [nextOrders, nextLowStock, nextStockVariants] = await Promise.all([
+        api<StaffOrder[]>(`${STAFF_API_BASE}/staff/orders?${params.toString()}`),
+        api<any[]>(`${STAFF_API_BASE}/staff/inventory/low-stock`),
+        api<StockVariantOption[]>(`${STAFF_API_BASE}/staff/inventory/variants`),
       ]);
       setOrders(nextOrders);
-      setReturns(nextReturns);
       setLowStock(nextLowStock);
       setStockVariants(nextStockVariants);
       setSelectedOrder((current) => nextOrders.find((order) => order.order_id === current?.order_id) ?? current);
@@ -261,7 +259,7 @@ function StaffPortalContent() {
     }
     try {
       const body: Record<string, string> = { status };
-      await api(`/staff/orders/${orderId}/status`, { method: "PUT", body: JSON.stringify(body) });
+      await api(`${STAFF_API_BASE}/staff/orders/${orderId}/status`, { method: "PUT", body: JSON.stringify(body) });
       setMessage(status === "cancelled" ? "Đã hủy đơn hàng" : "Đã cập nhật đơn hàng");
       await load();
     } catch (error) {
@@ -286,7 +284,7 @@ function StaffPortalContent() {
     setIsSavingShipment(true);
     setShipmentError("");
     try {
-      await api(`/staff/orders/${shipmentOrder.order_id}/status`, {
+      await api(`${STAFF_API_BASE}/staff/orders/${shipmentOrder.order_id}/status`, {
         method: "PUT",
         body: JSON.stringify({
           status: "waiting_pickup",
@@ -304,14 +302,6 @@ function StaffPortalContent() {
     } finally {
       setIsSavingShipment(false);
     }
-  }
-
-  async function updateReturn(returnId: number, status: string) {
-    const body: Record<string, string> = { status };
-    if (status === "rejected") body.reason = prompt("Lý do từ chối") ?? "";
-    await api(`/staff/returns/${returnId}/status`, { method: "PUT", body: JSON.stringify(body) });
-    setMessage("Đã cập nhật yêu cầu đổi trả");
-    await load();
   }
 
   async function openOrderHistory() {
@@ -394,7 +384,7 @@ function StaffPortalContent() {
     setIsSavingStock(true);
     setStockError("");
     try {
-      await api(`/staff/inventory/${stockModal}`, {
+      await api(`${STAFF_API_BASE}/staff/inventory/${stockModal}`, {
         method: "POST",
         body: JSON.stringify({ variant_id: variantId, change_quantity: quantity, reason }),
       });
@@ -515,17 +505,9 @@ function StaffPortalContent() {
 
         <section className="grid gap-4">
           <Panel title="Đổi trả / khiếu nại">
-            {returns.map((item) => (
-              <div key={item.return_id} className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm">
-                <b>#{item.return_id} - {item.status}</b>
-                <p>{item.reason}</p>
-                <div className="mt-2 space-x-2">
-                  {["approved", "rejected", "completed"].map((status) => (
-                    <button key={status} className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium hover:border-neutral-400 hover:bg-neutral-50" onClick={() => updateReturn(item.return_id, status)}>{status}</button>
-                  ))}
-                </div>
-              </div>
-            ))}
+            <div className="rounded-2xl border border-dashed border-neutral-200 bg-white p-4 text-sm text-neutral-500">
+              Tính năng này đang được hoàn thiện.
+            </div>
           </Panel>
         </section>
         </>}

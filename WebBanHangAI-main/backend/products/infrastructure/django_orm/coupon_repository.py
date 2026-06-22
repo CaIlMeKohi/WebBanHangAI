@@ -55,6 +55,29 @@ def _calculate_discount(coupon, customer, subtotal, cart_items):
 
 
 class DjangoOrmCouponRepository:
+    def list_available_for_cart(self, customer, cart_item_ids: list[int] | None = None):
+        cart_items = get_customer_cart_items(customer)
+        if cart_item_ids:
+            cart_items = cart_items.filter(cart_item_id__in=cart_item_ids)
+        cart_items = list(cart_items)
+        subtotal = sum(int(item.variant.price if item.variant_id else item.product.base_price) * item.quantity for item in cart_items)
+        if subtotal <= 0:
+            return []
+
+        available = []
+        for coupon in Coupon.objects.filter(is_active=True).order_by('-created_at'):
+            try:
+                discount = _calculate_discount(coupon, customer, subtotal, cart_items)
+            except BusinessRuleViolation:
+                continue
+            available.append({
+                'coupon': coupon,
+                'subtotal': subtotal,
+                'discount_amount': discount,
+                'final_amount': max(0, subtotal - discount),
+            })
+        return available
+
     def apply_to_cart(self, customer, code: str, cart_item_ids: list[int] | None = None):
         coupon_code = str(code or '').strip().upper()
         if not coupon_code:
