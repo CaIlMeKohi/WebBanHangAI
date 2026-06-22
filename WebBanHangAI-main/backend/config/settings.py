@@ -134,3 +134,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
     'DEFAULT_AUTHENTICATION_CLASSES': ['products.security.authentication.StoreUserAuthentication'],
 }
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = _env('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(_env('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = _env_bool('EMAIL_USE_TLS', 'True')
+EMAIL_HOST_USER = _env('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = _env('EMAIL_HOST_PASSWORD').replace(' ', '')
+DEFAULT_FROM_EMAIL = _env('DEFAULT_FROM_EMAIL', f'Fashion Shop <{EMAIL_HOST_USER}>')
+EMAIL_TIMEOUT = int(_env('EMAIL_TIMEOUT', '15'))

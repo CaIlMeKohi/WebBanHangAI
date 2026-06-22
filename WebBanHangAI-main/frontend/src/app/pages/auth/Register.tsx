@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { AlertCircle, Eye, EyeOff, UserPlus } from "lucide-react";
 
 import { useAdminAuth } from "../../context/AdminAuthContext";
+import { resendRegistrationOtp, verifyRegistrationOtp } from "../../lib/api";
 
 export function Register() {
   const navigate = useNavigate();
@@ -22,6 +23,9 @@ export function Register() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpEmail, setOtpEmail] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -70,7 +74,8 @@ export function Register() {
         province,
       });
       if (result.success) {
-        navigate("/shop", { replace: true });
+        setOtpEmail(result.email ?? username.trim().toLowerCase());
+        setNotice(result.devOtp ? `Mã OTP môi trường phát triển: ${result.devOtp}` : "Mã OTP đã được gửi đến email của bạn.");
       } else {
         setError(result.error ?? "Đăng ký thất bại");
       }
@@ -78,6 +83,49 @@ export function Register() {
       setIsLoading(false);
     }
   };
+
+  const handleVerifyOtp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setIsLoading(true);
+    try {
+      await verifyRegistrationOtp(otpEmail, otp);
+      navigate(`/login?registered=1`, { replace: true });
+    } catch (verifyError) {
+      setError(verifyError instanceof Error ? verifyError.message : "Không thể xác thực OTP");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError("");
+    setIsLoading(true);
+    try {
+      const result = await resendRegistrationOtp(otpEmail);
+      setNotice(result.dev_otp ? `Mã OTP môi trường phát triển: ${result.dev_otp}` : result.detail);
+    } catch (resendError) {
+      setError(resendError instanceof Error ? resendError.message : "Không thể gửi lại OTP");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (otpEmail) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-900 p-4">
+        <form onSubmit={handleVerifyOtp} className="w-full max-w-md space-y-5 rounded-lg bg-white p-6 shadow-xl">
+          <h1 className="text-2xl font-bold">Xác thực email</h1>
+          <p className="text-sm text-neutral-600">Nhập mã gồm 6 chữ số đã gửi đến {otpEmail}.</p>
+          {notice && <div className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">{notice}</div>}
+          {error && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+          <input value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder="Nhập mã OTP" className="w-full rounded-lg border px-4 py-3 text-center text-xl tracking-[0.35em]" />
+          <button disabled={isLoading || otp.length !== 6} className="w-full rounded-lg bg-neutral-900 py-3 text-white disabled:opacity-50">{isLoading ? "Đang xác thực..." : "Xác nhận OTP"}</button>
+          <button type="button" onClick={handleResendOtp} disabled={isLoading} className="w-full text-sm font-medium underline">Gửi lại mã OTP</button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-neutral-900 to-neutral-800 p-4">

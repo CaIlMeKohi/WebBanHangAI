@@ -1,91 +1,70 @@
-from decimal import Decimal
-from datetime import timedelta
 import secrets
 
-from django.contrib.auth.hashers import check_password, make_password
-from django.db import DatabaseError, models, transaction
-from django.db.models import Q
+from django.db import models, transaction
 from django.utils import timezone
 from rest_framework import generics, status, viewsets
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .application.cart_service import get_customer_cart_items, get_or_create_cart
-from .application.catalog_queries import active_products_queryset, apply_catalog_filters
 from .application.customer_context import get_active_user, get_customer_for_user
-from .infrastructure.stored_procedures import adjust_variant_stock, check_variant_stock, decrease_variant_stock, hard_delete_product, low_stock_variants
-from .security.authentication import create_access_token
-from .services.email_service import send_order_confirmation, send_verification_email
-from .models import Address, Brand, Cart, CartItem, Coupon, Customer, EmailVerificationToken, LoginLog, Order, OrderItem, Payment, Product, ProductVariant, Category, RecommendationLog, SearchLog, StoreUser, UserInteraction, WishlistItem
+from .infrastructure.stored_procedures import (
+    check_variant_stock,
+    hard_delete_product,
+)
+from .interfaces.api.catalog_views import (
+    AdminBrandViewSet as CatalogAdminBrandViewSet,
+    AdminCategoryViewSet as CatalogAdminCategoryViewSet,
+    BrandListAPIView as CatalogBrandListAPIView,
+    CategoryListAPIView as CatalogCategoryListAPIView,
+    ProductDetailAPIView as CatalogProductDetailAPIView,
+    ProductListAPIView as CatalogProductListAPIView,
+)
+from .interfaces.api.cart_views import (
+    CartAPIView as CleanCartAPIView,
+    CartItemAPIView as CleanCartItemAPIView,
+)
+from .interfaces.api.coupon_views import ApplyCouponAPIView as CleanApplyCouponAPIView
+from .interfaces.api.inventory_views import (
+    InventoryAdjustAPIView as CleanInventoryAdjustAPIView,
+    LowStockAPIView as CleanLowStockAPIView,
+    StockVariantListAPIView as CleanStockVariantListAPIView,
+)
+from .interfaces.api.order_views import (
+    CustomerOrderAPIView as CleanCustomerOrderAPIView,
+    CustomerOrderCancelAPIView as CleanCustomerOrderCancelAPIView,
+    CustomerOrderConfirmReceivedAPIView as CleanCustomerOrderConfirmReceivedAPIView,
+    CustomerOrderListAPIView as CleanCustomerOrderListAPIView,
+    StaffOrderStatusAPIView as CleanStaffOrderStatusAPIView,
+)
+from .interfaces.api.user_views import (
+    AuthLoginAPIView as CleanAuthLoginAPIView,
+    AuthRegisterAPIView as CleanAuthRegisterAPIView,
+)
+from .interfaces.api.wishlist_views import WishlistAPIView as CleanWishlistAPIView
+from .models import Address, AuditLog, CartItem, Coupon, Customer, Order, Product, ProductVariant, StoreUser, UserInteraction
 from .security.permissions import IsAdmin, IsStaff
 from .serializers import (
     AddressSerializer,
-    AuthSerializer,
-    BrandSerializer,
-    CartItemSerializer,
-    CategorySerializer,
     CouponSerializer,
     OrderSerializer,
-    ProductSerializer,
     UserProductEventSerializer,
     ProductAdminSerializer,
     ProductVariantSerializer,
-    RegisterSerializer,
     StoreUserSerializer,
-    WishlistItemSerializer,
 )
+from .application.orders.dto import CreateOrderDTO
+from .application.orders.use_cases import CreateCustomerOrderUseCase
+from .domain.common.exceptions import BusinessRuleViolation
+from .infrastructure.django_orm.order_repository import DjangoOrmOrderRepository
 
 
-class ProductPagination(PageNumberPagination):
-    page_size = 32
-    page_size_query_param = 'page_size'
-    max_page_size = 100
+class ProductListAPIView(CatalogProductListAPIView):
+    """Compatibility wrapper for the existing /api/products/ route."""
 
 
-class ProductListAPIView(generics.ListAPIView):
-    serializer_class = ProductSerializer
-    pagination_class = ProductPagination
-
-    def get_queryset(self):
-        queryset = active_products_queryset()
-        search = self.request.query_params.get('search')
-        queryset = apply_catalog_filters(queryset, self.request.query_params)
-        if search:
-            user = _get_user(self.request)
-            try:
-                SearchLog.objects.create(
-                    user=user,
-                    session_id=self.request.query_params.get('session_id'),
-                    query=search[:255],
-                )
-            except DatabaseError:
-                pass
-            first_product = queryset.first()
-            if user and first_product:
-                try:
-                    UserInteraction.objects.create(user=_get_customer(user), product=first_product, interaction_type='search', search_query=search[:255], score=0.5)
-                except DatabaseError:
-                    pass
-        return queryset
-
-
-class ProductDetailAPIView(generics.RetrieveAPIView):
-    queryset = Product.objects.filter(status='active').select_related('category', 'brand').prefetch_related('images', 'variants', 'category__children')
-    serializer_class = ProductSerializer
-    lookup_field = 'product_id'
-    lookup_url_kwarg = 'id'
-
-    def retrieve(self, request, *args, **kwargs):
-        response = super().retrieve(request, *args, **kwargs)
-        user = _get_user(request)
-        if user:
-            try:
-                UserInteraction.objects.create(user=_get_customer(user), product=self.get_object(), interaction_type='view', score=1.0)
-            except DatabaseError:
-                pass
-        return response
+class ProductDetailAPIView(CatalogProductDetailAPIView):
+    """Compatibility wrapper for the existing /api/products/<id>/ route."""
 
 
 class ProductAdminListCreateAPIView(generics.ListCreateAPIView):
@@ -96,7 +75,21 @@ class ProductAdminListCreateAPIView(generics.ListCreateAPIView):
     parser_classes = [JSONParser, FormParser, MultiPartParser]
 
     def perform_create(self, serializer):
-        serializer.save()
+        product = serializer.save()
+        AuditLog.objects.create(
+            actor=self.request.user,
+            action='create_product',
+            entity_type='product',
+            entity_id=str(product.product_id),
+            metadata={
+                'name': product.name,
+                'slug': product.slug,
+                'category_id': product.category_id,
+                'brand_id': product.brand_id,
+                'base_price': str(product.base_price),
+                'status': product.status,
+            },
+        )
 
 
 class ProductAdminUpdateDeleteAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -108,15 +101,84 @@ class ProductAdminUpdateDeleteAPIView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAdmin]
     parser_classes = [JSONParser, FormParser, MultiPartParser]
 
+    def perform_update(self, serializer):
+        before = self.get_object()
+        old_value = {
+            'name': before.name,
+            'slug': before.slug,
+            'category_id': before.category_id,
+            'brand_id': before.brand_id,
+            'base_price': str(before.base_price),
+            'status': before.status,
+            'gender': before.gender,
+            'is_new': before.is_new,
+        }
+        product = serializer.save()
+        AuditLog.objects.create(
+            actor=self.request.user,
+            action='update_product',
+            entity_type='product',
+            entity_id=str(product.product_id),
+            old_value=old_value,
+            metadata={
+                'name': product.name,
+                'slug': product.slug,
+                'category_id': product.category_id,
+                'brand_id': product.brand_id,
+                'base_price': str(product.base_price),
+                'status': product.status,
+                'gender': product.gender,
+                'is_new': product.is_new,
+            },
+        )
+
     def destroy(self, request, *args, **kwargs):
         product = self.get_object()
+        old_value = {
+            'name': product.name,
+            'slug': product.slug,
+            'category_id': product.category_id,
+            'brand_id': product.brand_id,
+            'base_price': str(product.base_price),
+            'status': product.status,
+        }
         result = hard_delete_product(product.product_id)
         if not result.get('deleted'):
             return Response(
                 {'detail': result.get('reason') or 'Khong the xoa san pham.'},
                 status=status.HTTP_409_CONFLICT,
             )
+        AuditLog.objects.create(
+            actor=request.user,
+            action='delete_product',
+            entity_type='product',
+            entity_id=str(product.product_id),
+            old_value=old_value,
+            metadata={'deleted': True},
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProductAdminHistoryAPIView(APIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, id):
+        items = (
+            AuditLog.objects.filter(entity_type='product', entity_id=str(id))
+            .select_related('actor')
+            .order_by('-created_at')[:100]
+        )
+        return Response([
+            {
+                'audit_id': item.audit_id,
+                'action': item.action,
+                'actor_email': item.actor.email if item.actor else '',
+                'old_value': item.old_value,
+                'metadata': item.metadata,
+                'created_at': item.created_at,
+            }
+            for item in items
+        ])
 
 
 class UserEventCreateAPIView(generics.CreateAPIView):
@@ -133,87 +195,16 @@ class UserEventCreateAPIView(generics.CreateAPIView):
         serializer.save()
 
 
-class CategoryListAPIView(generics.ListAPIView):
-    serializer_class = CategorySerializer
-
-    def get_queryset(self):
-        return Category.objects.filter(parent__isnull=True).prefetch_related('children', 'children__products').order_by('name')
+class CategoryListAPIView(CatalogCategoryListAPIView):
+    """Compatibility wrapper for the existing /api/products/categories/ route."""
 
 
-class AuthLoginAPIView(APIView):
-    def post(self, request):
-        serializer = AuthSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        username = serializer.validated_data['username'].strip().lower()
-        password = serializer.validated_data['password']
-        user = StoreUser.objects.filter(Q(email=username) | Q(phone=username)).first()
-
-        if not user or not user.is_active:
-            LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=request.META.get('REMOTE_ADDR', ''), reason='inactive_or_missing')
-            return Response({'detail': 'Tai khoan khong hop le hoac da bi khoa'}, status=status.HTTP_400_BAD_REQUEST)
-        if not check_password(password, user.password_hash):
-            LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=request.META.get('REMOTE_ADDR', ''), reason='bad_password')
-            return Response({'detail': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
-
-        LoginLog.objects.create(user=user, identifier=username, success=True, ip_address=request.META.get('REMOTE_ADDR', ''))
-        return Response({'user': StoreUserSerializer(user).data, 'access': create_access_token(user), 'expires_in_hours': 8 if user.role in {'staff', 'admin'} else 24})
+class AuthLoginAPIView(CleanAuthLoginAPIView):
+    """Compatibility wrapper for existing login routes."""
 
 
-class AuthRegisterAPIView(APIView):
-    def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        username = serializer.validated_data['username'].strip().lower()
-        password = serializer.validated_data['password']
-        email = username
-        phone = serializer.validated_data.get('phone', '').strip()
-
-        if StoreUser.objects.filter(email=email).exists():
-            return Response({'detail': 'User already exists'}, status=status.HTTP_400_BAD_REQUEST)
-        if phone and StoreUser.objects.filter(phone=phone).exists():
-            return Response({'detail': 'Phone already exists'}, status=status.HTTP_400_BAD_REQUEST)
-
-        with transaction.atomic():
-            user = StoreUser.objects.create(
-                email=email,
-                phone=phone or None,
-                password_hash=make_password(password),
-                role='customer',
-                account_status='active',
-                email_verified_at=timezone.now(),
-            )
-            Customer.objects.create(
-                user=user,
-                customer_code=f'KH{user.user_id:06d}',
-                full_name=serializer.validated_data['full_name'],
-                gender=serializer.validated_data.get('gender', 'unknown'),
-                birthday=serializer.validated_data.get('birthday'),
-            )
-            customer = user.customer_profile
-            address_line = str(request.data.get('address_line', '')).strip()
-            ward = str(request.data.get('ward', '')).strip()
-            district = str(request.data.get('district', '')).strip()
-            province = str(request.data.get('province', '')).strip()
-            if address_line and ward and district and province:
-                Address.objects.create(
-                    user=customer,
-                    full_name=serializer.validated_data['full_name'],
-                    phone=phone or '',
-                    address_line=address_line,
-                    ward=ward,
-                    district=district,
-                    province=province,
-                    is_default=True,
-                )
-            token = secrets.token_urlsafe(48)
-            EmailVerificationToken.objects.create(user=user, token=token, expires_at=timezone.now() + timedelta(hours=24))
-        email_result = send_verification_email(user.email, token)
-        payload = {'user': StoreUserSerializer(user).data, 'access': create_access_token(user)}
-        if email_result.get('skipped'):
-            payload['dev_verification_token'] = token
-        return Response(payload, status=status.HTTP_201_CREATED)
+class AuthRegisterAPIView(CleanAuthRegisterAPIView):
+    """Compatibility wrapper for existing register routes."""
 
 
 def _get_user(request):
@@ -231,12 +222,9 @@ def _get_customer(user):
 
 def _available_stock(product, variant=None):
     if variant is not None:
-        try:
-            stock = check_variant_stock(variant.variant_id, 1)
-            if stock is not None and 'available_stock' in stock:
-                return max(0, int(stock['available_stock']))
-        except DatabaseError:
-            pass
+        stock = check_variant_stock(variant.variant_id, 1)
+        if stock is not None and 'available_stock' in stock:
+            return max(0, int(stock['available_stock']))
         return max(0, variant.stock_quantity - variant.stock_reserved)
     return sum(max(0, item.stock_quantity - item.stock_reserved) for item in product.variants.all())
 
@@ -247,51 +235,6 @@ def _variant_label(variant):
     size = variant.size or 'STD'
     color = variant.color or 'Mac dinh'
     return f'{size}/{color}'
-
-
-def _positive_int(value, default=1):
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed >= default else None
-
-
-def _selected_cart_item_ids(value):
-    if not value:
-        return []
-    if isinstance(value, str):
-        value = [item for item in value.split(',') if item.strip()]
-    try:
-        ids = [int(item) for item in value]
-    except (TypeError, ValueError):
-        return None
-    return [item for item in ids if item > 0]
-
-
-def _cart_item_price(item):
-    if item.variant_id:
-        return item.variant.price
-    return item.product.base_price
-
-
-def _shipping_fee(subtotal, shipping_method):
-    if shipping_method == 'express':
-        return Decimal('50000')
-    return Decimal('0') if subtotal > Decimal('1000000') or subtotal == 0 else Decimal('30000')
-
-
-def _decrease_stock_for_order(variant, quantity, order_id):
-    try:
-        return decrease_variant_stock(variant.variant_id, quantity, order_id)
-    except DatabaseError:
-        locked_variant = ProductVariant.objects.select_for_update().get(variant_id=variant.variant_id)
-        available_stock = max(0, locked_variant.stock_quantity - locked_variant.stock_reserved)
-        if available_stock < quantity:
-            return False
-        locked_variant.stock_quantity -= quantity
-        locked_variant.save(update_fields=['stock_quantity', 'updated_at'])
-        return True
 
 
 class ProfileAPIView(APIView):
@@ -387,253 +330,46 @@ class AddressDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CartAPIView(APIView):
-    def get(self, request):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        if not customer:
-            return Response([])
-        items = get_customer_cart_items(customer)
-        return Response(CartItemSerializer(items, many=True).data)
-
-    def post(self, request):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        if not customer:
-            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        product = Product.objects.filter(product_id=request.data.get('product_id'), status='active').first()
-        if product is None:
-            return Response({'detail': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-        variant = None
-        size = request.data.get('size')
-        color = request.data.get('color')
-        variants = product.variants.filter(is_active=True)
-        requested_variant_id = request.data.get('variant_id')
-        if requested_variant_id:
-            variant = variants.filter(variant_id=requested_variant_id).first()
-        if variant is None:
-            for candidate in variants:
-                if (not size or candidate.size == size) and (not color or candidate.color == color):
-                    variant = candidate
-                    break
-        if variant is None:
-            variant = variants.first()
-        if variant is None:
-            return Response({'detail': 'San pham chua co SKU hop le'}, status=status.HTTP_400_BAD_REQUEST)
-
-        quantity = _positive_int(request.data.get('quantity', 1), 1)
-        if quantity is None:
-            return Response({'quantity': 'So luong phai lon hon 0.'}, status=status.HTTP_400_BAD_REQUEST)
-        if _available_stock(product, variant) < quantity:
-            return Response({'detail': f'Khong du ton kho cho bien the {_variant_label(variant)}'}, status=status.HTTP_400_BAD_REQUEST)
-
-        cart = get_or_create_cart(customer)
-        item, created = CartItem.objects.get_or_create(
-            cart=cart,
-            variant=variant,
-            defaults={'quantity': quantity},
-        )
-        if not created:
-            if _available_stock(product, variant) < item.quantity + quantity:
-                return Response({'detail': f'Khong du ton kho cho bien the {_variant_label(variant)}'}, status=status.HTTP_400_BAD_REQUEST)
-            item.quantity += quantity
-            item.save(update_fields=['quantity', 'updated_at'])
-
-        UserInteraction.objects.create(user=customer, product=product, interaction_type='add_to_cart', score=3.0)
-        item = get_customer_cart_items(customer).get(cart_item_id=item.cart_item_id)
-        return Response(CartItemSerializer(item).data, status=status.HTTP_201_CREATED)
+class CartAPIView(CleanCartAPIView):
+    """Compatibility wrapper for the existing /api/products/cart/ route."""
 
 
-class CartItemAPIView(APIView):
-    def put(self, request, item_id):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        item = CartItem.objects.filter(cart_item_id=item_id, cart__customer=customer).select_related('variant', 'variant__product').first()
-        if not item:
-            return Response({'detail': 'Cart item not found'}, status=status.HTTP_404_NOT_FOUND)
-        next_quantity = _positive_int(request.data.get('quantity', item.quantity), 1)
-        if next_quantity is None:
-            return Response({'quantity': 'So luong phai lon hon 0.'}, status=status.HTTP_400_BAD_REQUEST)
-        if _available_stock(item.product, item.variant) < next_quantity:
-            return Response({'detail': f'Khong du ton kho cho bien the {_variant_label(item.variant)}'}, status=status.HTTP_400_BAD_REQUEST)
-        item.quantity = next_quantity
-        item.save(update_fields=['quantity', 'updated_at'])
-        item = get_customer_cart_items(customer).get(cart_item_id=item.cart_item_id)
-        return Response(CartItemSerializer(item).data)
-
-    def delete(self, request, item_id):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        CartItem.objects.filter(cart_item_id=item_id, cart__customer=customer).delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+class CartItemAPIView(CleanCartItemAPIView):
+    """Compatibility wrapper for the existing /api/products/cart/<item_id>/ route."""
 
 
-class WishlistAPIView(APIView):
-    def get(self, request):
-        user = _get_user(request)
-        if not user:
-            return Response([])
-        customer = _get_customer(user)
-        if not customer:
-            return Response([])
-        items = WishlistItem.objects.filter(user=customer).select_related('product', 'product__category', 'product__brand').prefetch_related('product__images', 'product__variants')
-        return Response(WishlistItemSerializer(items, many=True).data)
-
-    def post(self, request):
-        user = _get_user(request)
-        if not user:
-            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        customer = _get_customer(user)
-        if not customer:
-            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-        if WishlistItem.objects.filter(user=customer).count() >= 100:
-            return Response({'detail': 'Danh sach yeu thich toi da 100 san pham'}, status=status.HTTP_400_BAD_REQUEST)
-        product = Product.objects.filter(product_id=request.data.get('product_id'), status='active').first()
-        if product is None:
-            return Response({'detail': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
-        item, created = WishlistItem.objects.get_or_create(user=customer, product=product)
-        if created:
-            UserInteraction.objects.create(user=customer, product=product, interaction_type='wishlist_add', score=2.5)
-        return Response(WishlistItemSerializer(item).data, status=status.HTTP_201_CREATED)
+class WishlistAPIView(CleanWishlistAPIView):
+    """Compatibility wrapper for the existing /api/products/wishlist/ route."""
 
 
-class OrderListCreateAPIView(APIView):
-    def get(self, request):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        if not customer:
-            return Response([])
-        orders = Order.objects.filter(user=customer).prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').order_by('-created_at')
-        return Response(OrderSerializer(orders, many=True).data)
-
+class OrderListCreateAPIView(CleanCustomerOrderListAPIView):
     @transaction.atomic
     def post(self, request):
         user = _get_user(request)
         customer = _get_customer(user)
         if not customer:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        selected_ids = _selected_cart_item_ids(request.data.get('cart_item_ids'))
-        if selected_ids is None:
-            return Response({'cart_item_ids': 'Danh sach san pham khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        cart_queryset = get_customer_cart_items(customer)
-        if selected_ids:
-            cart_queryset = cart_queryset.filter(cart_item_id__in=selected_ids)
-        cart_items = list(cart_queryset)
-        if not cart_items:
-            return Response({'detail': 'Cart is empty'}, status=status.HTTP_400_BAD_REQUEST)
-
-        payment_method = str(request.data.get('payment_method', 'cod')).strip()
-        if payment_method not in {'cod', 'bank_transfer', 'vnpay', 'momo'}:
-            return Response({'payment_method': 'Phuong thuc thanh toan khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        shipping_method = str(request.data.get('shipping_method', 'standard')).strip()
-        if shipping_method not in {'standard', 'express'}:
-            return Response({'shipping_method': 'Phuong thuc giao hang khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        address = None
-        address_id = request.data.get('address_id')
-        if address_id:
-            address = Address.objects.filter(user=customer, address_id=address_id).first()
-            if address is None:
-                return Response({'address_id': 'Dia chi giao hang khong hop le.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        shipping_address = request.data.get('shipping_address') or {}
-        if address is None and shipping_address:
-            serializer = AddressSerializer(data=shipping_address)
-            serializer.is_valid(raise_exception=True)
-            should_default = bool(serializer.validated_data.get('is_default')) or not Address.objects.filter(user=customer).exists()
-            if should_default:
-                Address.objects.filter(user=customer, is_default=True).update(is_default=False)
-            address = serializer.save(user=customer, is_default=should_default)
-
-        if address is None:
-            address = Address.objects.filter(user=customer, is_default=True).first()
-        if address is None:
-            return Response({'detail': 'Vui long cap nhat dia chi giao hang mac dinh truoc khi dat hang'}, status=status.HTTP_400_BAD_REQUEST)
-
-        for item in cart_items:
-            if _available_stock(item.product, item.variant) < item.quantity:
-                return Response({'detail': f'San pham {item.product.name} khong du ton kho'}, status=status.HTTP_400_BAD_REQUEST)
-
-        subtotal = sum(_cart_item_price(item) * item.quantity for item in cart_items)
-        shipping_fee = _shipping_fee(subtotal, shipping_method)
-        order = Order.objects.create(
-            user=customer,
-            address=address,
-            order_code=f'ORD{timezone.now().strftime("%Y%m%d%H%M%S")}{customer.customer_id}',
-            receiver_name_snapshot=address.full_name,
-            receiver_phone_snapshot=address.phone,
-            address_line_snapshot=address.address_line,
-            ward_snapshot=address.ward,
-            district_snapshot=address.district,
-            province_snapshot=address.province,
-            postal_code_snapshot=address.postal_code,
-            total_amount=subtotal,
-            shipping_fee=shipping_fee,
-            discount_amount=0,
-            final_amount=subtotal + shipping_fee,
-            payment_method=payment_method,
-        )
-        for item in cart_items:
-            price = _cart_item_price(item)
-            OrderItem.objects.create(
-                order=order,
-                product=item.product,
-                variant=item.variant,
-                product_name_snapshot=item.product.name,
-                brand_name_snapshot=item.product.brand.name,
-                category_name_snapshot=item.product.category.name,
-                sku_snapshot=item.variant.sku,
-                color_snapshot=item.variant.color,
-                size_snapshot=item.variant.size,
-                quantity=item.quantity,
-                price=price,
-                subtotal=price * item.quantity,
+        try:
+            order = CreateCustomerOrderUseCase(DjangoOrmOrderRepository()).execute(
+                user,
+                customer,
+                CreateOrderDTO.from_payload(request.data),
             )
-            if item.variant_id:
-                if not _decrease_stock_for_order(item.variant, item.quantity, order.order_id):
-                    return Response({'detail': f'San pham {item.product.name} khong du ton kho'}, status=status.HTTP_400_BAD_REQUEST)
-            UserInteraction.objects.create(user=customer, product=item.product, interaction_type='purchase', score=5.0)
-            RecommendationLog.objects.filter(user=customer, product=item.product, clicked=True, converted_order__isnull=True).update(
-                ordered_after_click=True,
-                converted_order=order,
-            )
-
-        Payment.objects.create(order=order, amount=order.final_amount, payment_method=order.payment_method, status='pending')
-        CartItem.objects.filter(cart_item_id__in=[item.cart_item_id for item in cart_items], cart__customer=customer).delete()
-        send_order_confirmation(user.email, order.order_id, order.final_amount)
-        order = Order.objects.prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').get(order_id=order.order_id)
+        except BusinessRuleViolation as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
 
-class BrandListAPIView(generics.ListAPIView):
-    serializer_class = BrandSerializer
-
-    def get_queryset(self):
-        return Brand.objects.filter(is_active=True).order_by('name')
+class BrandListAPIView(CatalogBrandListAPIView):
+    """Compatibility wrapper for the existing /api/products/brands/ route."""
 
 
-class AdminCategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.all().order_by('name')
-    serializer_class = CategorySerializer
-    permission_classes = [IsAdmin]
-
-    def destroy(self, request, *args, **kwargs):
-        category = self.get_object()
-        if Product.objects.filter(Q(category=category) | Q(category__parent=category)).exists():
-            category.is_active = False
-            category.save(update_fields=['is_active'])
-            return Response(CategorySerializer(category).data)
-        return super().destroy(request, *args, **kwargs)
+class AdminCategoryViewSet(CatalogAdminCategoryViewSet):
+    """Compatibility wrapper for the existing admin category router."""
 
 
-class AdminBrandViewSet(viewsets.ModelViewSet):
-    queryset = Brand.objects.all().order_by('name')
-    serializer_class = BrandSerializer
-    permission_classes = [IsAdmin]
+class AdminBrandViewSet(CatalogAdminBrandViewSet):
+    """Compatibility wrapper for the existing admin brand router."""
 
 
 class AdminVariantViewSet(viewsets.ModelViewSet):
@@ -647,6 +383,81 @@ class AdminCouponViewSet(viewsets.ModelViewSet):
     serializer_class = CouponSerializer
     permission_classes = [IsAdmin]
 
+    def _generate_coupon_code(self):
+        for _ in range(20):
+            code = f'CP{timezone.now().strftime("%y%m%d")}{secrets.token_hex(3).upper()}'
+            if not Coupon.objects.filter(code=code).exists():
+                return code
+        return f'CP{secrets.token_hex(8).upper()}'
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        if not str(data.get('code') or '').strip():
+            data['code'] = self._generate_coupon_code()
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        coupon = serializer.instance
+        AuditLog.objects.create(
+            actor=request.user,
+            action='create_coupon',
+            entity_type='coupon',
+            entity_id=str(coupon.coupon_id),
+            metadata={
+                'code': coupon.code,
+                'name': getattr(coupon, 'name', ''),
+                'discount_type': coupon.discount_type,
+                'discount_value': str(coupon.discount_value),
+            },
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        coupon = self.get_object()
+        old_value = {
+            'code': coupon.code,
+            'name': getattr(coupon, 'name', ''),
+            'discount_type': coupon.discount_type,
+            'discount_value': str(coupon.discount_value),
+            'is_active': coupon.is_active,
+        }
+        updated = serializer.save()
+        AuditLog.objects.create(
+            actor=self.request.user,
+            action='update_coupon',
+            entity_type='coupon',
+            entity_id=str(updated.coupon_id),
+            old_value=old_value,
+            metadata={
+                'code': updated.code,
+                'name': getattr(updated, 'name', ''),
+                'discount_type': updated.discount_type,
+                'discount_value': str(updated.discount_value),
+                'is_active': updated.is_active,
+            },
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        coupon = self.get_object()
+        old_value = {
+            'code': coupon.code,
+            'name': getattr(coupon, 'name', ''),
+            'discount_type': coupon.discount_type,
+            'discount_value': str(coupon.discount_value),
+            'is_active': coupon.is_active,
+        }
+        coupon_id = coupon.coupon_id
+        response = super().destroy(request, *args, **kwargs)
+        AuditLog.objects.create(
+            actor=request.user,
+            action='delete_coupon',
+            entity_type='coupon',
+            entity_id=str(coupon_id),
+            old_value=old_value,
+            metadata={'deleted': True},
+        )
+        return response
+
 
 class CartClearAPIView(APIView):
     def delete(self, request):
@@ -658,67 +469,35 @@ class CartClearAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ApplyCouponAPIView(APIView):
-    def post(self, request):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        if not customer:
-            return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        code = str(request.data.get('code', '')).strip().upper()
-        coupon = Coupon.objects.filter(code__iexact=code, is_active=True).first()
-        if coupon is None:
-            return Response({'detail': 'Coupon khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
-        if coupon.expiry_date and coupon.expiry_date < timezone.localdate():
-            return Response({'detail': 'Coupon da het han'}, status=status.HTTP_400_BAD_REQUEST)
-        if coupon.usage_limit is not None and coupon.used_count >= coupon.usage_limit:
-            return Response({'detail': 'Coupon da het luot su dung'}, status=status.HTTP_400_BAD_REQUEST)
-
-        cart_items = get_customer_cart_items(customer)
-        subtotal = sum(int(item.variant.price if item.variant_id else item.product.base_price) * item.quantity for item in cart_items)
-        if subtotal < coupon.min_order_amount:
-            return Response({'detail': 'Don hang chua dat gia tri toi thieu'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if coupon.discount_type == 'percentage':
-            discount = subtotal * coupon.discount_value // 100
-            if coupon.max_discount:
-                discount = min(discount, coupon.max_discount)
-        else:
-            discount = coupon.discount_value
-        discount = min(discount, subtotal)
-        return Response({'coupon': CouponSerializer(coupon).data, 'subtotal': subtotal, 'discount_amount': discount, 'final_amount': max(0, subtotal - discount)})
+class ApplyCouponAPIView(CleanApplyCouponAPIView):
+    """Compatibility wrapper for the existing /api/products/cart/apply-coupon/ route."""
 
 
-class OrderDetailAPIView(APIView):
-    def get(self, request, order_id):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        order = Order.objects.filter(order_id=order_id, user=customer).prefetch_related('items', 'items__product', 'items__product__images', 'items__product__variants').first()
-        if order is None:
-            return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(OrderSerializer(order).data)
+class OrderDetailAPIView(CleanCustomerOrderAPIView):
+    """Compatibility wrapper for the existing customer order detail route."""
 
 
-class OrderCancelAPIView(APIView):
-    @transaction.atomic
-    def post(self, request, order_id):
-        user = _get_user(request)
-        customer = _get_customer(user)
-        order = Order.objects.filter(order_id=order_id, user=customer).first()
-        if order is None:
-            return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
-        if order.status not in {'pending', 'confirmed', 'processing'}:
-            return Response({'detail': 'Khong the huy don o trang thai hien tai'}, status=status.HTTP_400_BAD_REQUEST)
-        order.status = 'cancelled'
-        order.save(update_fields=['status', 'updated_at'])
-        return Response(OrderSerializer(order).data)
+class OrderCancelAPIView(CleanCustomerOrderCancelAPIView):
+    """Compatibility wrapper for the existing customer order cancel route."""
+
+
+class OrderConfirmReceivedAPIView(CleanCustomerOrderConfirmReceivedAPIView):
+    """Compatibility wrapper for customer order received confirmation."""
 
 
 class StaffOrderListAPIView(APIView):
     permission_classes = [IsStaff]
 
     def get(self, request):
-        orders = Order.objects.filter(status__in=['pending', 'confirmed', 'processing']).order_by('-created_at')
+        orders = Order.objects.filter(status__in=[
+            'pending',
+            'confirmed',
+            'processing',
+            'waiting_pickup',
+            'shipped',
+            'delivered',
+            'completed',
+        ]).order_by('-created_at')
         status_param = request.query_params.get('status')
         payment_method = request.query_params.get('payment_method')
         if status_param:
@@ -728,61 +507,17 @@ class StaffOrderListAPIView(APIView):
         return Response(OrderSerializer(orders.prefetch_related('items', 'items__product'), many=True).data)
 
 
-class StaffOrderStatusAPIView(APIView):
-    permission_classes = [IsStaff]
-    transitions = {
-        'pending': {'confirmed', 'cancelled'},
-        'confirmed': {'processing', 'cancelled'},
-        'processing': {'shipped', 'cancelled'},
-        'shipped': {'delivered'},
-    }
-
-    @transaction.atomic
-    def put(self, request, order_id):
-        order = Order.objects.filter(order_id=order_id).first()
-        if order is None:
-            return Response({'detail': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
-        next_status = request.data.get('status')
-        if next_status not in self.transitions.get(order.status, set()):
-            return Response({'detail': 'Chuyen trang thai khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
-        if next_status == 'shipped' and (not request.data.get('carrier_name') or not request.data.get('tracking_code')):
-            return Response({'detail': 'Can nhap don vi van chuyen va ma van don khi shipped'}, status=status.HTTP_400_BAD_REQUEST)
-        order.status = next_status
-        order.save(update_fields=['status', 'updated_at'])
-        return Response(OrderSerializer(order).data)
+class StaffOrderStatusAPIView(CleanStaffOrderStatusAPIView):
+    """Compatibility wrapper for the existing staff order status route."""
 
 
-class InventoryAdjustAPIView(APIView):
-    permission_classes = [IsStaff]
-
-    @transaction.atomic
-    def post(self, request):
-        variant = ProductVariant.objects.filter(variant_id=request.data.get('variant_id')).first()
-        if variant is None:
-            return Response({'detail': 'Variant not found'}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            change = int(request.data.get('change_quantity'))
-        except (TypeError, ValueError):
-            return Response({'detail': 'change_quantity khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
-        reason = str(request.data.get('reason', '')).strip()
-        if not reason:
-            return Response({'detail': 'Bat buoc nhap ly do dieu chinh kho'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            adjust_variant_stock(
-                variant_id=variant.variant_id,
-                change_quantity=change,
-                staff_user_id=request.user.user_id,
-                action_type='import' if change > 0 else 'adjust',
-                reason=reason[:500],
-            )
-        except DatabaseError:
-            return Response({'detail': 'Khong the dieu chinh kho. Vui long kiem tra so luong va thu lai.'}, status=status.HTTP_400_BAD_REQUEST)
-        variant.refresh_from_db()
-        return Response(ProductVariantSerializer(variant).data)
+class InventoryAdjustAPIView(CleanInventoryAdjustAPIView):
+    """Compatibility wrapper for the existing inventory adjust/import routes."""
 
 
-class LowStockAPIView(APIView):
-    permission_classes = [IsStaff]
+class LowStockAPIView(CleanLowStockAPIView):
+    """Compatibility wrapper for the existing low stock route."""
 
-    def get(self, request):
-        return Response(low_stock_variants())
+
+class StockVariantListAPIView(CleanStockVariantListAPIView):
+    """Compatibility wrapper for the existing staff inventory routes."""

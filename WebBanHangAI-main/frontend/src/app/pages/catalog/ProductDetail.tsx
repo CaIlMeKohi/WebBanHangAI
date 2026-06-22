@@ -79,7 +79,6 @@ export function ProductDetail() {
         const apiRelated = await fetchRelatedProducts(id as string, 4).catch(
           () => [],
         );
-
         if (isMounted) {
           setProduct(apiProduct);
           setRelatedProducts(apiRelated);

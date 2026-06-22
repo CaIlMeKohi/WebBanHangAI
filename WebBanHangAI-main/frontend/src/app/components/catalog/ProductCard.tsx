@@ -7,10 +7,7 @@ import type { Product } from "../../data/products";
 import { addCartItem, addWishlistItem, recordRecommendationClick } from "../../lib/api";
 import { dispatchCartAddedNotice } from "../../lib/cartNotice";
 import { CART_UPDATED_EVENT, addStoredCartItem } from "../../lib/cartStorage";
-import {
-  formatCurrency,
-  getColorSwatchStyle,
-} from "../../lib/productPresentation";
+import { formatCurrency } from "../../lib/productPresentation";
 import {
   addStoredWishlistId,
   readStoredWishlistIds,
@@ -28,6 +25,11 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
   const { userId } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const discountPercent = product.discountPercent ?? (
+    product.originalPrice && product.originalPrice > product.price
+      ? Math.round((1 - product.price / product.originalPrice) * 100)
+      : 0
+  );
 
   const redirectToLogin = () => {
     const next = `${location.pathname}${location.search}`;
@@ -97,7 +99,7 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
         }
       }}
     >
-      <div className="relative mb-3 aspect-[4/5] overflow-hidden bg-neutral-100">
+      <div className="relative mb-3 aspect-[4/5] overflow-hidden bg-neutral-100 dark:bg-neutral-800">
         <img
           src={product.image}
           alt={product.name}
@@ -110,9 +112,9 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
               Mới
             </span>
           )}
-          {product.originalPrice && (
+          {product.originalPrice && discountPercent > 0 && (
             <span className="bg-neutral-900 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-white">
-              Sale
+              Giảm {discountPercent}%
             </span>
           )}
         </div>
@@ -149,10 +151,10 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
       </div>
 
       <div className="space-y-1.5">
-        <div className="text-[11px] uppercase tracking-wide text-neutral-500">
-          {product.brandName ?? product.categoryName ?? "Collection"}
+        <div className="text-[11px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+          {product.brandName ?? product.categoryName ?? "Bộ sưu tập"}
         </div>
-        <h3 className="line-clamp-2 text-sm font-medium text-neutral-900 transition-colors group-hover:text-neutral-600">
+        <h3 className="line-clamp-2 text-sm font-medium text-neutral-900 transition-colors group-hover:text-neutral-600 dark:text-neutral-100 dark:group-hover:text-white">
           {product.name}
         </h3>
 
@@ -163,41 +165,26 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
                 key={index}
                 className={`h-3 w-3 ${
                   index < Math.floor(product.rating)
-                    ? "fill-neutral-900 text-neutral-900"
-                    : "text-neutral-300"
+                    ? "fill-neutral-900 text-neutral-900 dark:fill-white dark:text-white"
+                    : "text-neutral-300 dark:text-neutral-600"
                 }`}
               />
             ))}
           </div>
-          <span className="text-xs text-neutral-500">({product.reviews})</span>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">({product.reviews})</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-neutral-900">
+          <span className="text-sm font-medium text-neutral-900 dark:text-white">
             {formatCurrency(product.price)}
           </span>
           {product.originalPrice && (
-            <span className="text-sm text-neutral-400 line-through">
+            <span className="text-sm text-neutral-400 line-through dark:text-neutral-500">
               {formatCurrency(product.originalPrice)}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1 pt-1">
-          {product.colors.slice(0, 4).map((color) => (
-            <div
-              key={color}
-              className="h-4 w-4 rounded-full border border-neutral-300"
-              style={getColorSwatchStyle(color)}
-              title={color}
-            />
-          ))}
-          {product.colors.length > 4 && (
-            <span className="text-xs text-neutral-500">
-              +{product.colors.length - 4}
-            </span>
-          )}
-        </div>
       </div>
     </Link>
   );

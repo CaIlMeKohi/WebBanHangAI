@@ -45,6 +45,10 @@ set "VENV_PY=venv\Scripts\python.exe"
 
 echo [INFO] Build frontend de dong bo source moi nhat...
 pushd ..\frontend
+if not exist "node_modules" (
+  echo [INFO] Cai dat frontend dependencies...
+  call npm install || goto :error
+)
 call npm run build || goto :error
 popd
 

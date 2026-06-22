@@ -1,24 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
-
-type UserRow = {
-  user_id: number;
-  email: string;
-  phone?: string;
-  role: string;
-  account_status: string;
-  must_change_password?: boolean;
-};
-
-type OrderRow = {
-  order_id: number;
-  final_amount: number;
-  status: string;
-  payment_status: string;
-  payment_method: string;
-  created_at: string;
-};
 
 type PaymentMethodRow = {
   method_id: number;
@@ -67,8 +49,6 @@ function asArray<T>(value: T[] | { results?: T[] } | { revenue?: T[] } | null | 
 }
 
 export function AdminOperations() {
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [orders, setOrders] = useState<OrderRow[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRow[]>([]);
   const [configs, setConfigs] = useState<RecommendationConfigRow[]>([]);
   const [lowStock, setLowStock] = useState<any[]>([]);
@@ -77,7 +57,13 @@ export function AdminOperations() {
   const [bestProducts, setBestProducts] = useState<any[]>([]);
   const [bestBrands, setBestBrands] = useState<any[]>([]);
   const [recommendations, setRecommendations] = useState<any | null>(null);
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [modalError, setModalError] = useState("");
+  const [thresholdModalOpen, setThresholdModalOpen] = useState(false);
+  const [thresholdValue, setThresholdValue] = useState("5");
+  const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [configKey, setConfigKey] = useState("top_n");
+  const [configValue, setConfigValue] = useState('{"value":10}');
 
   const revenueTotal = useMemo(
     () => revenue.reduce((sum, row) => sum + Number(row.revenue ?? row.total_revenue ?? row.total_amount ?? 0), 0),
@@ -85,10 +71,8 @@ export function AdminOperations() {
   );
 
   async function load() {
-    const [nextUsers, nextOrders, nextPaymentMethods, nextConfigs, nextLowStock, nextRevenue, nextOrderStatus, nextProducts, nextBrands, nextReco] =
+    const [nextPaymentMethods, nextConfigs, nextLowStock, nextRevenue, nextOrderStatus, nextProducts, nextBrands, nextReco] =
       await Promise.all([
-        api<UserRow[] | { results: UserRow[] }>("/admin/users/"),
-        api<OrderRow[]>("/admin/orders"),
         api<PaymentMethodRow[] | { results: PaymentMethodRow[] }>("/admin/payment-methods/"),
         api<RecommendationConfigRow[] | { results: RecommendationConfigRow[] }>("/admin/recommendation-configs/"),
         api<any[]>("/admin/inventory/low-stock"),
@@ -98,8 +82,6 @@ export function AdminOperations() {
         api<any[]>("/admin/reports/best-brands"),
         api<any>("/admin/reports/recommendations"),
       ]);
-    setUsers(asArray(nextUsers));
-    setOrders(asArray(nextOrders));
     setPaymentMethods(asArray(nextPaymentMethods));
     setConfigs(asArray(nextConfigs));
     setLowStock(asArray(nextLowStock));
@@ -111,81 +93,62 @@ export function AdminOperations() {
   }
 
   useEffect(() => {
-    load().catch((error) => setMessage(error.message));
+    load().catch((err) => setError(err instanceof Error ? err.message : "Không tải được cài đặt"));
   }, []);
-
-  async function createStaff() {
-    const email = prompt("Email nhân viên/admin");
-    const password = prompt("Mật khẩu tạm thời tối thiểu 12 ký tự");
-    const role = prompt("Role: staff hoặc admin", "staff") ?? "staff";
-    if (!email || !password) return;
-    await api("/admin/staffs", { method: "POST", body: JSON.stringify({ email, password, role, full_name: email }) });
-    setMessage("Đã tạo tài khoản");
-    await load();
-  }
-
-  async function toggleUser(userId: number, locked: boolean) {
-    await api(`/admin/users/${userId}/${locked ? "unlock" : "lock"}`, { method: "PUT", body: "{}" });
-    setMessage(locked ? "Đã mở khóa tài khoản" : "Đã khóa tài khoản");
-    await load();
-  }
-
-  async function updateOrderStatus(order: OrderRow) {
-    const status = prompt("Trạng thái mới: confirmed, processing, shipped, delivered, cancelled", order.status);
-    if (!status || status === order.status) return;
-    const body: Record<string, string> = { status };
-    if (status === "shipped") {
-      body.carrier_name = prompt("Đơn vị vận chuyển") ?? "";
-      body.tracking_code = prompt("Mã vận đơn") ?? "";
-    }
-    await api(`/admin/orders/${order.order_id}/status`, { method: "PUT", body: JSON.stringify(body) });
-    setMessage("Đã cập nhật đơn hàng");
-    await load();
-  }
 
   async function togglePaymentMethod(item: PaymentMethodRow) {
     if (item.source === "payments.method") {
-      setMessage("DB hiện tại lưu method trên từng payment. Muốn bật/tắt riêng cần thêm bảng payment_methods.");
+      setError("DB hiện tại lưu phương thức trên từng thanh toán. Cần bảng payment_methods riêng để bật/tắt.");
       return;
     }
     await api(`/admin/payment-methods/${item.method_id}/`, {
       method: "PUT",
       body: JSON.stringify({ code: item.code, name: item.name, is_active: !item.is_active, config: {} }),
     });
-    setMessage("Đã cập nhật phương thức thanh toán");
     await load();
   }
 
-  async function updateThreshold() {
-    const threshold = Number(prompt("Ngưỡng tồn kho thấp mới", "5"));
-    if (!Number.isFinite(threshold) || threshold < 0) return;
-    await api("/admin/inventory/low-stock-threshold", { method: "PUT", body: JSON.stringify({ threshold }) });
-    setMessage("Đã cập nhật ngưỡng tồn kho thấp");
-    await load();
-  }
-
-  async function saveRecommendationConfig() {
-    const config_key = prompt("Key cấu hình", "top_n");
-    const rawValue = prompt("Giá trị JSON", '{"value":10}');
-    if (!config_key || !rawValue) return;
-    let config_value: unknown;
-    try {
-      config_value = JSON.parse(rawValue);
-    } catch {
-      setMessage("Giá trị config phải là JSON hợp lệ");
+  async function updateThreshold(event: FormEvent) {
+    event.preventDefault();
+    const threshold = Number(thresholdValue);
+    if (!Number.isFinite(threshold) || threshold < 0) {
+      setModalError("Ngưỡng tồn kho phải là số không âm");
       return;
     }
-    await api("/admin/recommendation-configs/", {
-      method: "POST",
-      body: JSON.stringify({ config_key, config_value, description: "Cấu hình recommendation từ Admin Portal" }),
-    });
-    setMessage("Đã lưu cấu hình recommendation");
-    await load();
+    try {
+      await api("/admin/inventory/low-stock-threshold", { method: "PUT", body: JSON.stringify({ threshold }) });
+      setThresholdModalOpen(false);
+      setModalError("");
+      await load();
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : "Không cập nhật được ngưỡng tồn kho");
+    }
+  }
+
+  async function saveRecommendationConfig(event: FormEvent) {
+    event.preventDefault();
+    let config_value: unknown;
+    try {
+      config_value = JSON.parse(configValue);
+    } catch {
+      setModalError("Giá trị config phải là JSON hợp lệ");
+      return;
+    }
+    try {
+      await api("/admin/recommendation-configs/", {
+        method: "POST",
+        body: JSON.stringify({ config_key: configKey, config_value, description: "Cấu hình recommendation từ Admin Portal" }),
+      });
+      setConfigModalOpen(false);
+      setModalError("");
+      await load();
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : "Không lưu được cấu hình AI");
+    }
   }
 
   async function runRecommendations() {
-    const result = await api<{ generated: number }>("/admin/recommendations/run", { method: "POST", body: "{}" });
-    setMessage(`Đã tạo ${result.generated} gợi ý`);
+    await api<{ generated: number }>("/admin/recommendations/run", { method: "POST", body: "{}" });
     await load();
   }
 
@@ -194,42 +157,31 @@ export function AdminOperations() {
       <div className="mx-auto max-w-7xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold text-neutral-950">Admin Operations</h1>
-            <p className="text-sm text-neutral-500">Quản lý tài khoản, đơn hàng, thanh toán, tồn kho, báo cáo và gợi ý AI.</p>
+            <h1 className="text-2xl font-semibold text-neutral-950">Settings</h1>
+            <p className="text-sm text-neutral-500">Cấu hình thanh toán, tồn kho, báo cáo và gợi ý AI.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button className="rounded-md border bg-white px-4 py-2" onClick={createStaff}>Tạo nhân viên</button>
-            <button className="rounded-md border bg-white px-4 py-2" onClick={updateThreshold}>Ngưỡng tồn kho</button>
-            <button className="rounded-md border bg-white px-4 py-2" onClick={saveRecommendationConfig}>Cấu hình AI</button>
-            <button className="rounded-md bg-neutral-950 px-4 py-2 text-white" onClick={runRecommendations}>Chạy gợi ý AI</button>
+            <button className="rounded-md border bg-white px-4 py-2" onClick={() => { setThresholdModalOpen(true); setModalError(""); }}>
+              Ngưỡng tồn kho
+            </button>
+            <button className="rounded-md border bg-white px-4 py-2" onClick={() => { setConfigModalOpen(true); setModalError(""); }}>
+              Cấu hình AI
+            </button>
+            <button className="rounded-md bg-neutral-950 px-4 py-2 text-white" onClick={runRecommendations}>
+              Chạy gợi ý AI
+            </button>
           </div>
         </header>
 
-        {message && <div className="rounded-md border bg-white p-3 text-sm text-neutral-700">{message}</div>}
+        {error && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
-        <section className="grid gap-4 md:grid-cols-5">
-          <Metric label="Tài khoản" value={users.length} />
-          <Metric label="Đơn hàng" value={orders.length} />
-          <Metric label="Doanh thu" value={`${revenueTotal.toLocaleString("vi-VN")}d`} />
+        <section className="grid gap-4 md:grid-cols-3">
+          <Metric label="Doanh thu" value={`${revenueTotal.toLocaleString("vi-VN")}đ`} />
           <Metric label="CTR AI" value={`${Math.round((recommendations?.ctr ?? 0) * 100)}%`} />
           <Metric label="Tồn kho thấp" value={lowStock.length} />
         </section>
 
         <section className="grid gap-4 xl:grid-cols-2">
-          <Panel title="Tài khoản">
-            <DataTable rows={users} columns={["user_id", "email", "role", "account_status"]} action={(user) => (
-              <button className="rounded border px-2 py-1" onClick={() => toggleUser(user.user_id, user.account_status === "locked")}>
-                {user.account_status === "locked" ? "Mở khóa" : "Khóa"}
-              </button>
-            )} />
-          </Panel>
-
-          <Panel title="Đơn hàng">
-            <DataTable rows={orders} columns={["order_id", "status", "payment_status", "payment_method", "final_amount"]} action={(order) => (
-              <button className="rounded border px-2 py-1" onClick={() => updateOrderStatus(order)}>Cập nhật</button>
-            )} />
-          </Panel>
-
           <Panel title="Phương thức thanh toán">
             <DataTable rows={paymentMethods} columns={["code", "name", "is_active", "usage_count"]} action={(item) => (
               <button className="rounded border px-2 py-1" onClick={() => togglePaymentMethod(item)}>
@@ -254,6 +206,36 @@ export function AdminOperations() {
           <DataTable rows={lowStock} columns={["variant_id", "sku", "product_name", "stock_quantity", "low_stock_threshold"]} />
         </Panel>
       </div>
+
+      {thresholdModalOpen && (
+        <Modal title="Cập nhật ngưỡng tồn kho" onClose={() => setThresholdModalOpen(false)}>
+          <form className="space-y-4" onSubmit={updateThreshold}>
+            {modalError && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{modalError}</div>}
+            <label className="block space-y-1 text-sm">
+              <span>Ngưỡng tồn kho thấp</span>
+              <input className="w-full rounded border px-3 py-2" type="number" min="0" value={thresholdValue} onChange={(event) => setThresholdValue(event.target.value)} />
+            </label>
+            <ModalActions onCancel={() => setThresholdModalOpen(false)} />
+          </form>
+        </Modal>
+      )}
+
+      {configModalOpen && (
+        <Modal title="Cấu hình AI" onClose={() => setConfigModalOpen(false)}>
+          <form className="space-y-4" onSubmit={saveRecommendationConfig}>
+            {modalError && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{modalError}</div>}
+            <label className="block space-y-1 text-sm">
+              <span>Config key</span>
+              <input className="w-full rounded border px-3 py-2" value={configKey} onChange={(event) => setConfigKey(event.target.value)} />
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span>Giá trị JSON</span>
+              <textarea className="min-h-28 w-full rounded border px-3 py-2 font-mono text-sm" value={configValue} onChange={(event) => setConfigValue(event.target.value)} />
+            </label>
+            <ModalActions onCancel={() => setConfigModalOpen(false)} />
+          </form>
+        </Modal>
+      )}
     </main>
   );
 }
@@ -296,12 +278,8 @@ function DataTable<T extends Record<string, any>>({
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={row.id ?? row.user_id ?? row.order_id ?? row.method_id ?? row.config_id ?? row.variant_id ?? index} className="border-t">
-              {columns.map((column) => (
-                <td key={column} className="max-w-[220px] truncate px-2 py-2">
-                  {formatCell(row[column])}
-                </td>
-              ))}
+            <tr key={row.id ?? row.method_id ?? row.config_id ?? row.variant_id ?? index} className="border-t">
+              {columns.map((column) => <td key={column} className="max-w-[220px] truncate px-2 py-2">{formatCell(row[column])}</td>)}
               {action && <td className="px-2 py-2 text-right">{action(row)}</td>}
             </tr>
           ))}
@@ -333,6 +311,29 @@ function ReportBlock({ title, rows }: { title: string; rows: any[] }) {
         ))}
         {!rows.length && <div className="text-neutral-500">Chưa có dữ liệu</div>}
       </div>
+    </div>
+  );
+}
+
+function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button className="rounded px-2 py-1 text-neutral-500 hover:bg-neutral-100" onClick={onClose}>Đóng</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ModalActions({ onCancel }: { onCancel: () => void }) {
+  return (
+    <div className="flex justify-end gap-2">
+      <button type="button" className="rounded border px-4 py-2" onClick={onCancel}>Hủy</button>
+      <button type="submit" className="rounded bg-neutral-950 px-4 py-2 text-white">Lưu</button>
     </div>
   );
 }

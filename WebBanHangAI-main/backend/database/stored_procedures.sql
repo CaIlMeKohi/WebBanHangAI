@@ -204,12 +204,343 @@ BEGIN
         pv.stock_quantity,
         pv.stock_reserved,
         pv.low_stock_threshold,
+        CASE
+            WHEN pv.low_stock_threshold IS NULL OR pv.low_stock_threshold < 5 THEN 5
+            ELSE pv.low_stock_threshold
+        END AS effective_low_stock_threshold,
         pv.is_active
     FROM dbo.product_variants pv
     INNER JOIN dbo.products p ON p.product_id = pv.product_id
     WHERE pv.is_active = 1
-      AND pv.stock_quantity - pv.stock_reserved <= pv.low_stock_threshold
+      AND p.status = N'active'
+      AND pv.stock_quantity - pv.stock_reserved <= CASE
+            WHEN pv.low_stock_threshold IS NULL OR pv.low_stock_threshold < 5 THEN 5
+            ELSE pv.low_stock_threshold
+        END
     ORDER BY pv.stock_quantity - pv.stock_reserved ASC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_UpdateOrderStatus
+    @OrderId BIGINT,
+    @NextStatus NVARCHAR(20),
+    @ActorUserId BIGINT = NULL,
+    @CarrierName NVARCHAR(100) = NULL,
+    @TrackingCode NVARCHAR(100) = NULL,
+    @Note NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @OldStatus NVARCHAR(20);
+    DECLARE @StaffId BIGINT = NULL;
+
+    IF @NextStatus NOT IN ('confirmed', 'processing', 'waiting_pickup', 'shipped', 'delivered', 'completed')
+        THROW 50020, 'Invalid order status.', 1;
+
+    BEGIN TRANSACTION;
+
+    SELECT @OldStatus = order_status
+    FROM dbo.orders WITH (UPDLOCK, ROWLOCK)
+    WHERE order_id = @OrderId;
+
+    IF @OldStatus IS NULL
+    BEGIN
+        ROLLBACK TRANSACTION;
+        THROW 50021, 'Order not found.', 1;
+    END;
+
+    IF NOT (
+        (@OldStatus = 'pending' AND @NextStatus = 'confirmed')
+        OR (@OldStatus = 'confirmed' AND @NextStatus = 'processing')
+        OR (@OldStatus = 'processing' AND @NextStatus = 'waiting_pickup')
+        OR (@OldStatus = 'waiting_pickup' AND @NextStatus = 'shipped')
+        OR (@OldStatus = 'shipped' AND @NextStatus = 'delivered')
+        OR (@OldStatus = 'delivered' AND @NextStatus = 'completed')
+    )
+    BEGIN
+        ROLLBACK TRANSACTION;
+        THROW 50022, 'Invalid order status transition.', 1;
+    END;
+
+    IF @NextStatus = 'waiting_pickup'
+    BEGIN
+        IF NULLIF(LTRIM(RTRIM(@CarrierName)), '') IS NULL
+        BEGIN
+            ROLLBACK TRANSACTION;
+            THROW 50023, 'Carrier name is required when shipping an order.', 1;
+        END;
+
+        SELECT @StaffId = staff_id
+        FROM dbo.staffs
+        WHERE user_id = @ActorUserId;
+
+        IF NULLIF(LTRIM(RTRIM(@TrackingCode)), '') IS NULL
+            SET @TrackingCode = CONCAT(
+                'BKQ', FORMAT(SYSUTCDATETIME(), 'yyMMdd'),
+                RIGHT(CONCAT('00000', @OrderId), 5),
+                UPPER(LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 5))
+            );
+
+        UPDATE dbo.shipments
+        SET carrier_name = @CarrierName,
+            tracking_code = @TrackingCode,
+            shipment_status = 'waiting_pickup',
+            created_by_staff_id = @StaffId,
+            updated_at = SYSUTCDATETIME()
+        WHERE order_id = @OrderId;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            INSERT INTO dbo.shipments (
+                order_id, carrier_name, tracking_code, shipment_status,
+                shipped_at, delivered_at, created_by_staff_id, created_at, updated_at
+            )
+            VALUES (
+                @OrderId, @CarrierName, @TrackingCode, 'waiting_pickup',
+                NULL, NULL, @StaffId, SYSUTCDATETIME(), SYSUTCDATETIME()
+            );
+        END;
+    END;
+
+    IF @NextStatus IN ('shipped', 'delivered', 'completed')
+    BEGIN
+        UPDATE dbo.shipments
+        SET shipment_status = @NextStatus,
+            shipped_at = CASE
+                WHEN @NextStatus = 'shipped' AND shipped_at IS NULL THEN SYSUTCDATETIME()
+                ELSE shipped_at
+            END,
+            delivered_at = CASE
+                WHEN @NextStatus IN ('delivered', 'completed') AND delivered_at IS NULL THEN SYSUTCDATETIME()
+                ELSE delivered_at
+            END,
+            updated_at = SYSUTCDATETIME()
+        WHERE order_id = @OrderId;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+            THROW 50024, 'Shipment was not found for this order.', 1;
+        END;
+    END;
+
+    UPDATE dbo.orders
+    SET order_status = @NextStatus,
+        updated_at = SYSUTCDATETIME()
+    WHERE order_id = @OrderId;
+
+    INSERT INTO dbo.order_status_histories (
+        order_id, old_status, new_status, note, changed_by_user_id, created_at
+    )
+    VALUES (
+        @OrderId, @OldStatus, @NextStatus,
+        COALESCE(NULLIF(LTRIM(RTRIM(@Note)), ''), CONCAT(N'Status changed to ', @NextStatus)),
+        @ActorUserId, SYSUTCDATETIME()
+    );
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @OrderId AS order_id,
+        @OldStatus AS old_status,
+        @NextStatus AS new_status,
+        @CarrierName AS carrier_name,
+        @TrackingCode AS tracking_code;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_CancelOrderAndRestoreStock
+    @OrderId BIGINT,
+    @ActorUserId BIGINT = NULL,
+    @Reason NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @OldStatus NVARCHAR(20);
+
+    BEGIN TRANSACTION;
+
+    SELECT @OldStatus = order_status
+    FROM dbo.orders WITH (UPDLOCK, ROWLOCK)
+    WHERE order_id = @OrderId;
+
+    IF @OldStatus IS NULL
+    BEGIN
+        ROLLBACK TRANSACTION;
+        THROW 50030, 'Order not found.', 1;
+    END;
+
+    IF @OldStatus NOT IN ('pending', 'confirmed', 'processing')
+    BEGIN
+        ROLLBACK TRANSACTION;
+        THROW 50031, 'Only pending, confirmed or processing orders can be cancelled.', 1;
+    END;
+
+    ;WITH Items AS (
+        SELECT variant_id, SUM(quantity) AS quantity
+        FROM dbo.order_items
+        WHERE order_id = @OrderId
+        GROUP BY variant_id
+    )
+    UPDATE pv
+    SET stock_quantity = pv.stock_quantity + i.quantity,
+        updated_at = SYSUTCDATETIME()
+    FROM dbo.product_variants pv
+    INNER JOIN Items i ON i.variant_id = pv.variant_id;
+
+    INSERT INTO dbo.stock_movements (
+        variant_id, order_id, staff_id, action_type,
+        quantity_before, change_quantity, quantity_after,
+        reason, note, created_at
+    )
+    SELECT
+        pv.variant_id,
+        @OrderId,
+        s.staff_id,
+        'release',
+        pv.stock_quantity - i.quantity,
+        i.quantity,
+        pv.stock_quantity,
+        COALESCE(NULLIF(@Reason, ''), N'Cancel order and restore stock'),
+        CONCAT(N'Cancelled from status: ', @OldStatus),
+        SYSUTCDATETIME()
+    FROM dbo.product_variants pv
+    INNER JOIN (
+        SELECT variant_id, SUM(quantity) AS quantity
+        FROM dbo.order_items
+        WHERE order_id = @OrderId
+        GROUP BY variant_id
+    ) i ON i.variant_id = pv.variant_id
+    LEFT JOIN dbo.staffs s ON s.user_id = @ActorUserId;
+
+    UPDATE dbo.orders
+    SET order_status = 'cancelled',
+        payment_status = CASE
+            WHEN payment_status = 'paid' THEN payment_status
+            ELSE 'unpaid'
+        END,
+        updated_at = SYSUTCDATETIME()
+    WHERE order_id = @OrderId;
+
+    INSERT INTO dbo.order_status_histories (
+        order_id, old_status, new_status, note, changed_by_user_id, created_at
+    )
+    VALUES (
+        @OrderId, @OldStatus, 'cancelled',
+        COALESCE(NULLIF(@Reason, ''), N'Cancel order and restore stock'),
+        @ActorUserId,
+        SYSUTCDATETIME()
+    );
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @OrderId AS order_id,
+        @OldStatus AS old_status,
+        'cancelled' AS new_status;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_RefundOrder
+    @OrderId BIGINT,
+    @ActorUserId BIGINT = NULL,
+    @Reason NVARCHAR(500) = NULL,
+    @RestoreStock BIT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @OldPaymentStatus NVARCHAR(20);
+    DECLARE @OldOrderStatus NVARCHAR(20);
+
+    BEGIN TRANSACTION;
+
+    SELECT
+        @OldPaymentStatus = payment_status,
+        @OldOrderStatus = order_status
+    FROM dbo.orders WITH (UPDLOCK, ROWLOCK)
+    WHERE order_id = @OrderId;
+
+    IF @OldPaymentStatus IS NULL
+    BEGIN
+        ROLLBACK TRANSACTION;
+        THROW 50040, 'Order not found.', 1;
+    END;
+
+    UPDATE dbo.payments
+    SET status = 'failed',
+        refunded_at = SYSUTCDATETIME(),
+        failure_reason = COALESCE(NULLIF(@Reason, ''), failure_reason, N'Refunded'),
+        updated_at = SYSUTCDATETIME()
+    WHERE order_id = @OrderId;
+
+    UPDATE dbo.orders
+    SET payment_status = 'refunded',
+        updated_at = SYSUTCDATETIME()
+    WHERE order_id = @OrderId;
+
+    IF @RestoreStock = 1
+    BEGIN
+        ;WITH Items AS (
+            SELECT variant_id, SUM(quantity) AS quantity
+            FROM dbo.order_items
+            WHERE order_id = @OrderId
+            GROUP BY variant_id
+        )
+        UPDATE pv
+        SET stock_quantity = pv.stock_quantity + i.quantity,
+            updated_at = SYSUTCDATETIME()
+        FROM dbo.product_variants pv
+        INNER JOIN Items i ON i.variant_id = pv.variant_id;
+
+        INSERT INTO dbo.stock_movements (
+            variant_id, order_id, staff_id, action_type,
+            quantity_before, change_quantity, quantity_after,
+            reason, note, created_at
+        )
+        SELECT
+            pv.variant_id,
+            @OrderId,
+            s.staff_id,
+            'return_in',
+            pv.stock_quantity - i.quantity,
+            i.quantity,
+            pv.stock_quantity,
+            COALESCE(NULLIF(@Reason, ''), N'Return completed and stock restored'),
+            CONCAT(N'Refunded from payment status: ', @OldPaymentStatus),
+            SYSUTCDATETIME()
+        FROM dbo.product_variants pv
+        INNER JOIN (
+            SELECT variant_id, SUM(quantity) AS quantity
+            FROM dbo.order_items
+            WHERE order_id = @OrderId
+            GROUP BY variant_id
+        ) i ON i.variant_id = pv.variant_id
+        LEFT JOIN dbo.staffs s ON s.user_id = @ActorUserId;
+    END;
+
+    INSERT INTO dbo.order_status_histories (
+        order_id, old_status, new_status, note, changed_by_user_id, created_at
+    )
+    VALUES (
+        @OrderId, @OldOrderStatus, @OldOrderStatus,
+        COALESCE(NULLIF(@Reason, ''), N'Payment refunded'),
+        @ActorUserId,
+        SYSUTCDATETIME()
+    );
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @OrderId AS order_id,
+        @OldPaymentStatus AS old_payment_status,
+        'refunded' AS new_payment_status,
+        @RestoreStock AS restored_stock;
 END;
 GO
 
@@ -294,11 +625,12 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    IF @GroupBy NOT IN ('day', 'month')
-        THROW 50007, 'GroupBy must be day or month.', 1;
+    IF @GroupBy NOT IN ('day', 'month', 'quarter')
+        THROW 50007, 'GroupBy must be day, month or quarter.', 1;
 
     SELECT
         CASE
+            WHEN @GroupBy = 'quarter' THEN CONCAT(YEAR(created_at), '-Q', DATEPART(QUARTER, created_at))
             WHEN @GroupBy = 'month' THEN FORMAT(created_at, 'yyyy-MM')
             ELSE FORMAT(created_at, 'yyyy-MM-dd')
         END AS period,
@@ -311,6 +643,7 @@ BEGIN
       AND (@FromDate IS NULL OR created_at >= @FromDate)
       AND (@ToDate IS NULL OR created_at < DATEADD(DAY, 1, @ToDate))
     GROUP BY CASE
+        WHEN @GroupBy = 'quarter' THEN CONCAT(YEAR(created_at), '-Q', DATEPART(QUARTER, created_at))
         WHEN @GroupBy = 'month' THEN FORMAT(created_at, 'yyyy-MM')
         ELSE FORMAT(created_at, 'yyyy-MM-dd')
     END
@@ -336,6 +669,25 @@ BEGIN
       AND (@ToDate IS NULL OR created_at < DATEADD(DAY, 1, @ToDate))
     GROUP BY payment_method, payment_status
     ORDER BY revenue DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_ReportOrderStatus
+    @FromDate DATETIME2 = NULL,
+    @ToDate DATETIME2 = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        order_status AS status,
+        COUNT(*) AS count,
+        SUM(final_amount) AS total_amount
+    FROM dbo.orders
+    WHERE (@FromDate IS NULL OR created_at >= @FromDate)
+      AND (@ToDate IS NULL OR created_at < DATEADD(DAY, 1, @ToDate))
+    GROUP BY order_status
+    ORDER BY order_status;
 END;
 GO
 

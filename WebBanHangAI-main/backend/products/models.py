@@ -26,6 +26,60 @@ class StoreUser(models.Model):
         db_table = 'users'
 
 
+class UserSession(models.Model):
+    session_id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='user_id', related_name='sessions')
+    jwt_id = models.CharField(max_length=128, unique=True)
+    refresh_token_hash = models.CharField(max_length=255, null=True, blank=True)
+    ip_address = models.CharField(max_length=64, null=True, blank=True)
+    user_agent = models.CharField(max_length=500, null=True, blank=True)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'user_sessions'
+
+
+class StaffProfile(models.Model):
+    staff_id = models.BigAutoField(primary_key=True)
+    user = models.OneToOneField(StoreUser, on_delete=models.CASCADE, db_column='user_id', related_name='staff_profile')
+    staff_code = models.CharField(max_length=50, unique=True)
+    full_name = models.CharField(max_length=255)
+    position = models.CharField(max_length=100)
+    department = models.CharField(max_length=100)
+    status = models.CharField(max_length=30, default='working')
+    hire_date = models.DateField(null=True, blank=True)
+    can_process_orders = models.BooleanField(default=True)
+    can_manage_inventory = models.BooleanField(default=True)
+    can_handle_returns = models.BooleanField(default=True)
+    can_moderate_reviews = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'staffs'
+
+
+class AdminProfile(models.Model):
+    admin_id = models.BigAutoField(primary_key=True)
+    user = models.OneToOneField(StoreUser, on_delete=models.CASCADE, db_column='user_id', related_name='admin_profile')
+    admin_code = models.CharField(max_length=50, unique=True)
+    full_name = models.CharField(max_length=255)
+    level = models.CharField(max_length=20, default='admin')
+    can_manage_users = models.BooleanField(default=True)
+    can_manage_catalog = models.BooleanField(default=True)
+    can_manage_orders = models.BooleanField(default=True)
+    can_manage_payments = models.BooleanField(default=True)
+    can_manage_ai = models.BooleanField(default=True)
+    can_view_reports = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'admins'
+
+
 class Customer(models.Model):
     customer_id = models.BigAutoField(primary_key=True)
     user = models.OneToOneField(StoreUser, on_delete=models.CASCADE, db_column='user_id', related_name='customer_profile')
@@ -97,6 +151,8 @@ class Brand(models.Model):
 
 
 class Product(models.Model):
+    GENDER_CHOICES = [('men', 'Men'), ('women', 'Women'), ('unisex', 'Unisex')]
+
     product_id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255)
     slug = models.CharField(max_length=255, unique=True)
@@ -105,6 +161,7 @@ class Product(models.Model):
     base_price = models.DecimalField(max_digits=12, decimal_places=2)
     brand = models.ForeignKey(Brand, on_delete=models.PROTECT, db_column='brand_id', related_name='products')
     category = models.ForeignKey(Category, on_delete=models.PROTECT, db_column='category_id', related_name='products')
+    gender = models.CharField(max_length=20, choices=GENDER_CHOICES, default='unisex')
     average_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
     review_count = models.IntegerField(default=0)
     sold_count = models.IntegerField(default=0)
@@ -121,8 +178,15 @@ class Product(models.Model):
         db_table = 'products'
         indexes = [
             models.Index(fields=['category']),
+            models.Index(fields=['gender', 'category', 'status'], name='products_gender_cat_status_idx'),
             models.Index(fields=['base_price']),
             models.Index(fields=['created_at']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(gender__in=['men', 'women', 'unisex']),
+                name='CK_products_gender',
+            ),
         ]
 
 
@@ -149,6 +213,8 @@ class ProductImage(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='images')
     variant = models.ForeignKey(ProductVariant, null=True, blank=True, on_delete=models.SET_NULL, db_column='variant_id', related_name='images')
     image_url = models.CharField(max_length=500)
+    cloudinary_public_id = models.CharField(max_length=255, null=True, blank=True)
+    cloudinary_asset_id = models.CharField(max_length=255, null=True, blank=True)
     alt_text = models.CharField(max_length=255, blank=True)
     is_primary = models.BooleanField(default=False)
     display_order = models.IntegerField(default=0)
@@ -156,6 +222,45 @@ class ProductImage(models.Model):
 
     class Meta:
         db_table = 'product_images'
+
+
+class CloudinaryAsset(models.Model):
+    asset_id = models.BigAutoField(primary_key=True)
+    public_id = models.CharField(max_length=255, unique=True)
+    cloudinary_asset_id = models.CharField(max_length=255, null=True, blank=True)
+    secure_url = models.CharField(max_length=500)
+    resource_type = models.CharField(max_length=50, default='image')
+    format = models.CharField(max_length=20, blank=True)
+    width = models.IntegerField(null=True, blank=True)
+    height = models.IntegerField(null=True, blank=True)
+    bytes = models.BigIntegerField(null=True, blank=True)
+    folder = models.CharField(max_length=255, blank=True)
+    original_filename = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    uploaded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'cloudinary_assets'
+
+
+class AttributeKey(models.Model):
+    attribute_key_id = models.BigAutoField(primary_key=True)
+    code = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=255)
+    is_filterable = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'attribute_keys'
+
+
+class ProductAttributeValue(models.Model):
+    attribute_value_id = models.BigAutoField(primary_key=True)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='attribute_values')
+    attribute_key = models.ForeignKey(AttributeKey, on_delete=models.CASCADE, db_column='attribute_key_id', related_name='product_values')
+    value = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = 'product_attribute_values'
 
 
 class Tag(models.Model):
@@ -230,16 +335,19 @@ class Coupon(models.Model):
     DISCOUNT_TYPE_CHOICES = [('percentage', 'Percentage'), ('fixed', 'Fixed')]
 
     coupon_id = models.BigAutoField(primary_key=True)
+    name = models.CharField(max_length=255, blank=True, default='')
     code = models.CharField(max_length=50, unique=True)
     discount_type = models.CharField(max_length=20, choices=DISCOUNT_TYPE_CHOICES, db_column='coupon_type')
     discount_value = models.DecimalField(max_digits=14, decimal_places=2)
     min_order_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     max_discount = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    category = models.ForeignKey(Category, null=True, blank=True, on_delete=models.SET_NULL, db_column='category_id', related_name='coupons')
+    product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.SET_NULL, db_column='product_id', related_name='coupons')
     usage_limit = models.IntegerField(null=True, blank=True)
     used_count = models.IntegerField(default=0)
     per_customer_limit = models.IntegerField(default=1)
     start_at = models.DateTimeField(null=True, blank=True)
-    end_at = models.DateTimeField()
+    end_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -251,20 +359,40 @@ class Coupon(models.Model):
         db_table = 'coupons'
 
 
+class CouponUsage(models.Model):
+    coupon_usage_id = models.BigAutoField(primary_key=True)
+    coupon = models.ForeignKey(Coupon, on_delete=models.PROTECT, db_column='coupon_id', related_name='usages')
+    user = models.ForeignKey(Customer, on_delete=models.PROTECT, db_column='customer_id', related_name='coupon_usages')
+    order = models.ForeignKey('Order', on_delete=models.PROTECT, db_column='order_id', related_name='coupon_usages')
+    discount_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    used_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'coupon_usages'
+
+
 class Order(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('confirmed', 'Confirmed'),
         ('processing', 'Processing'),
+        ('waiting_pickup', 'Waiting pickup'),
         ('shipped', 'Shipped'),
         ('delivered', 'Delivered'),
+        ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
     ]
-    PAYMENT_STATUS_CHOICES = [('unpaid', 'Unpaid'), ('paid', 'Paid'), ('refunded', 'Refunded')]
+    PAYMENT_STATUS_CHOICES = [
+        ('unpaid', 'Unpaid'),
+        ('pending', 'Pending'),
+        ('paid', 'Paid'),
+        ('failed', 'Failed'),
+        ('refunded', 'Refunded'),
+    ]
     PAYMENT_METHOD_CHOICES = [('cod', 'COD'), ('vnpay', 'VNPay'), ('momo', 'MoMo'), ('bank_transfer', 'Bank Transfer')]
 
     order_id = models.BigAutoField(primary_key=True)
-    order_code = models.CharField(max_length=50)
+    order_code = models.CharField(max_length=50, default='')
     user = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='orders')
     address = models.ForeignKey(Address, on_delete=models.PROTECT, db_column='address_id', related_name='orders')
     receiver_name_snapshot = models.CharField(max_length=255, default='')
@@ -319,6 +447,19 @@ class OrderItem(models.Model):
         ]
 
 
+class StockReservation(models.Model):
+    reservation_id = models.BigAutoField(primary_key=True)
+    variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, db_column='variant_id', related_name='reservations')
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='order_id', related_name='stock_reservations')
+    quantity = models.IntegerField()
+    status = models.CharField(max_length=30)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'stock_reservations'
+
+
 class Payment(models.Model):
     STATUS_CHOICES = [('pending', 'Pending'), ('success', 'Success'), ('failed', 'Failed')]
     PAYMENT_METHOD_CHOICES = [('cod', 'COD'), ('vnpay', 'VNPay'), ('momo', 'MoMo'), ('bank_transfer', 'Bank Transfer')]
@@ -341,21 +482,34 @@ class Payment(models.Model):
 
 
 class Review(models.Model):
-    review_id = models.AutoField(primary_key=True)
+    review_id = models.BigAutoField(primary_key=True)
     product = models.ForeignKey(Product, on_delete=models.CASCADE, db_column='product_id', related_name='reviews')
-    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='reviews')
+    user = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='reviews')
     order_item = models.ForeignKey(OrderItem, null=True, blank=True, on_delete=models.SET_NULL, db_column='order_item_id', related_name='reviews')
     rating = models.PositiveSmallIntegerField()
     comment = models.TextField(null=True, blank=True)
     status = models.CharField(max_length=20, default='pending')
     hidden_reason = models.TextField(blank=True)
-    moderated_by_staff = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='moderated_by_staff_id', related_name='moderated_reviews')
+    moderated_by_staff = models.ForeignKey(StaffProfile, null=True, blank=True, on_delete=models.SET_NULL, db_column='moderated_by_staff_id', related_name='moderated_reviews')
     image_urls = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'reviews'
+
+
+class ReviewImage(models.Model):
+    image_id = models.BigAutoField(primary_key=True)
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, db_column='review_id', related_name='images')
+    image_url = models.CharField(max_length=500)
+    cloudinary_public_id = models.CharField(max_length=255, null=True, blank=True)
+    display_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'review_images'
+        indexes = [models.Index(fields=['review'])]
 
 
 class UserInteraction(models.Model):
@@ -384,9 +538,11 @@ class UserInteraction(models.Model):
 
 class SearchLog(models.Model):
     search_id = models.BigAutoField(primary_key=True)
-    user = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='user_id', related_name='search_logs')
+    user = models.ForeignKey(Customer, null=True, blank=True, on_delete=models.SET_NULL, db_column='customer_id', related_name='search_logs')
     session_id = models.CharField(max_length=100, null=True, blank=True)
-    query = models.CharField(max_length=255)
+    query = models.CharField(max_length=255, db_column='keyword')
+    filters = models.TextField(null=True, blank=True)
+    result_count = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -442,7 +598,7 @@ class StockMovement(models.Model):
     movement_id = models.BigAutoField(primary_key=True)
     variant = models.ForeignKey(ProductVariant, on_delete=models.PROTECT, db_column='variant_id', related_name='stock_movements')
     order = models.ForeignKey(Order, null=True, blank=True, on_delete=models.SET_NULL, db_column='order_id', related_name='stock_movements')
-    staff = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='staff_id', related_name='stock_movements')
+    staff = models.ForeignKey(StaffProfile, null=True, blank=True, on_delete=models.SET_NULL, db_column='staff_id', related_name='stock_movements')
     action_type = models.CharField(max_length=30)
     quantity_before = models.IntegerField()
     change_quantity = models.IntegerField()
@@ -496,6 +652,39 @@ class LoginLog(models.Model):
         db_table = 'login_logs'
 
 
+class EmailOutbox(models.Model):
+    email_id = models.BigAutoField(primary_key=True)
+    to_email = models.CharField(max_length=254)
+    subject = models.CharField(max_length=255)
+    body = models.TextField()
+    status = models.CharField(max_length=30, default='pending')
+    related_user = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='related_user_id', related_name='email_outbox')
+    related_order = models.ForeignKey(Order, null=True, blank=True, on_delete=models.SET_NULL, db_column='related_order_id', related_name='email_outbox')
+    error_message = models.TextField(null=True, blank=True)
+    retry_count = models.IntegerField(default=0)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'email_outbox'
+
+
+class PaymentWebhookLog(models.Model):
+    webhook_log_id = models.BigAutoField(primary_key=True)
+    payment = models.ForeignKey(Payment, null=True, blank=True, on_delete=models.SET_NULL, db_column='payment_id', related_name='webhook_logs')
+    provider = models.CharField(max_length=50)
+    transaction_code = models.CharField(max_length=255, null=True, blank=True)
+    payload = models.TextField()
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed = models.BooleanField(default=False)
+    process_message = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'payment_webhook_logs'
+
+
 class AuditLog(models.Model):
     audit_id = models.BigAutoField(primary_key=True, db_column='audit_log_id')
     actor = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='actor_user_id', related_name='audit_logs')
@@ -533,7 +722,7 @@ class Shipment(models.Model):
     shipment_status = models.CharField(max_length=30, default='pending')
     shipped_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
-    created_by_staff = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='created_by_staff_id', related_name='created_shipments')
+    created_by_staff = models.ForeignKey(StaffProfile, null=True, blank=True, on_delete=models.SET_NULL, db_column='created_by_staff_id', related_name='created_shipments')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -545,14 +734,14 @@ class ReturnRequest(models.Model):
     STATUS_CHOICES = [('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'), ('completed', 'Completed')]
 
     return_id = models.BigAutoField(primary_key=True, db_column='return_request_id')
-    user = models.ForeignKey(StoreUser, on_delete=models.CASCADE, db_column='customer_id', related_name='return_requests')
+    user = models.ForeignKey(Customer, on_delete=models.CASCADE, db_column='customer_id', related_name='return_requests')
     order = models.ForeignKey(Order, on_delete=models.CASCADE, db_column='order_id', related_name='return_requests')
     order_item = models.ForeignKey(OrderItem, null=True, blank=True, on_delete=models.SET_NULL, db_column='order_item_id', related_name='return_requests')
     reason = models.TextField()
     desired_solution = models.CharField(max_length=255, blank=True, db_column='requested_action')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     reject_reason = models.TextField(blank=True, db_column='resolution_note')
-    processed_by = models.ForeignKey(StoreUser, null=True, blank=True, on_delete=models.SET_NULL, db_column='staff_id', related_name='processed_returns')
+    processed_by = models.ForeignKey(StaffProfile, null=True, blank=True, on_delete=models.SET_NULL, db_column='staff_id', related_name='processed_returns')
     processed_at = models.DateTimeField(null=True, blank=True, db_column='resolved_at')
     created_at = models.DateTimeField(auto_now_add=True)
     evidence_image_urls = models.TextField(blank=True)

@@ -2,8 +2,10 @@ export type ProductSort = "featured" | "newest" | "price_asc" | "price_desc";
 
 export interface CatalogQuery {
   category?: string;
+  gender?: "men" | "women" | "unisex";
   subcategory?: string[];
   search?: string;
+  brand?: string;
   minPrice?: number;
   maxPrice?: number;
   isNew?: boolean;
@@ -28,12 +30,14 @@ export interface Product {
   name: string;
   price: number;
   originalPrice?: number;
+  discountPercent?: number;
   image: string;
   images?: string[];
   category: string;
   categoryName?: string;
   subcategory: string;
   subcategoryName?: string;
+  gender?: "men" | "women" | "unisex";
   rating: number;
   reviews: number;
   colors: string[];
@@ -54,8 +58,9 @@ export const products: Product[] = [
     price: 299000,
     image:
       "https://images.unsplash.com/photo-1618677603544-51162346e165?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwd2hpdGUlMjB0c2hpcnQlMjBjbG90aGluZ3xlbnwxfHx8fDE3NzQ2ODYxMzF8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "unisex",
+    category: "ao-thun",
     subcategory: "ao-thun",
+    gender: "unisex",
     rating: 4.8,
     reviews: 342,
     colors: ["Trắng", "Đen", "Xám"],
@@ -72,8 +77,9 @@ export const products: Product[] = [
     originalPrice: 1299000,
     image:
       "https://images.unsplash.com/photo-1759873821397-433b7ea0eb7c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiZWlnZSUyMHN3ZWF0ZXIlMjBmYXNoaW9uJTIwbW9kZWx8ZW58MXx8fHwxNzc0Njg2MTMxfDA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "women",
+    category: "ao-len",
     subcategory: "ao-len",
+    gender: "women",
     rating: 4.9,
     reviews: 189,
     colors: ["Be", "Kem", "Đen"],
@@ -89,8 +95,9 @@ export const products: Product[] = [
     price: 799000,
     image:
       "https://images.unsplash.com/photo-1744383390068-abfc7bc7fd07?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxibGFjayUyMGRlbmltJTIwamVhbnMlMjBmYXNoaW9ufGVufDF8fHx8MTc3NDY0MTg0MHww&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "unisex",
+    category: "quan",
     subcategory: "quan",
+    gender: "unisex",
     rating: 4.7,
     reviews: 456,
     colors: ["Đen", "Xanh đậm", "Xanh nhạt"],
@@ -105,8 +112,9 @@ export const products: Product[] = [
     price: 2499000,
     image:
       "https://images.unsplash.com/photo-1763385230031-ea852e0858cd?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxuZXV0cmFsJTIwY29hdCUyMGphY2tldCUyMGZhc2hpb258ZW58MXx8fHwxNzc0Njg2MTMyfDA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "unisex",
+    category: "ao-khoac",
     subcategory: "ao-khoac",
+    gender: "unisex",
     rating: 4.9,
     reviews: 124,
     colors: ["Be", "Đen", "Xanh navy"],
@@ -122,8 +130,9 @@ export const products: Product[] = [
     price: 1199000,
     image:
       "https://images.unsplash.com/photo-1769107805528-964f4de0e342?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx3aGl0ZSUyMGRyZXNzJTIwbWluaW1hbGlzdCUyMGZhc2hpb258ZW58MXx8fHwxNzc0Njg2MTMyfDA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "women",
+    category: "vay",
     subcategory: "vay",
+    gender: "women",
     rating: 4.8,
     reviews: 267,
     colors: ["Trắng", "Cát", "Xám nhạt"],
@@ -138,8 +147,9 @@ export const products: Product[] = [
     price: 599000,
     image:
       "https://images.unsplash.com/photo-1722926628555-252c1c0258bf?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxncmF5JTIwY2FzdWFsJTIwc2hpcnQlMjBjbG90aGluZ3xlbnwxfHx8fDE3NzQ2ODYxMzJ8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "men",
+    category: "ao-so-mi",
     subcategory: "ao-so-mi",
+    gender: "men",
     rating: 4.6,
     reviews: 301,
     colors: ["Trắng", "Xanh", "Xám"],
@@ -155,8 +165,9 @@ export const products: Product[] = [
     originalPrice: 1399000,
     image:
       "https://images.unsplash.com/photo-1766056278792-d5b15656b7e8?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxiZWlnZSUyMHRyb3VzZXJzJTIwcGFudHMlMjBmYXNoaW9ufGVufDF8fHx8MTc3NDY4NjEzM3ww&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "unisex",
+    category: "quan",
     subcategory: "quan",
+    gender: "men",
     rating: 4.7,
     reviews: 198,
     colors: ["Be", "Đen", "Xanh navy", "Xám"],
@@ -172,8 +183,9 @@ export const products: Product[] = [
     price: 1999000,
     image:
       "https://images.unsplash.com/photo-1770363759232-dc50afcc29a9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxibGFjayUyMGJsYXplciUyMGZvcm1hbCUyMHdlYXJ8ZW58MXx8fHwxNzc0Njc3OTk0fDA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "women",
+    category: "ao-khoac",
     subcategory: "ao-khoac",
+    gender: "women",
     rating: 4.9,
     reviews: 156,
     colors: ["Đen", "Xanh navy", "Xám than"],
@@ -188,8 +200,9 @@ export const products: Product[] = [
     price: 1099000,
     image:
       "https://images.unsplash.com/photo-1764697907449-457a99bfe4d6?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxrbml0JTIwc3dlYXRlciUyMG5ldXRyYWwlMjB0b25lc3xlbnwxfHx8fDE3NzQ2MDAyNjJ8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "unisex",
+    category: "ao-len",
     subcategory: "ao-len",
+    gender: "unisex",
     rating: 4.8,
     reviews: 223,
     colors: ["Kem", "Xám", "Nâu lạc đà"],
@@ -204,8 +217,9 @@ export const products: Product[] = [
     price: 1399000,
     image:
       "https://images.unsplash.com/photo-1772808800357-25b62a1f3974?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYXN1YWwlMjB3aGl0ZSUyMHNuZWFrZXJzJTIwc2hvZXN8ZW58MXx8fHwxNzc0Njg2MTM0fDA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "unisex",
+    category: "giay",
     subcategory: "giay",
+    gender: "unisex",
     rating: 4.9,
     reviews: 512,
     colors: ["Trắng", "Đen", "Xám"],
@@ -221,8 +235,9 @@ export const products: Product[] = [
     price: 699000,
     image:
       "https://images.unsplash.com/photo-1709745490680-eb2d7c94a196?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxvdmVyc2l6ZWQlMjBob29kaWUlMjBzdHJlZXR3ZWFyJTIwbmV1dHJhbHxlbnwxfHx8fDE3NzQ2ODYxMzV8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    category: "unisex",
+    category: "ao-thun",
     subcategory: "ao-thun",
+    gender: "unisex",
     rating: 4.7,
     reviews: 389,
     colors: ["Be", "Xám", "Đen", "Trắng"],
@@ -239,29 +254,34 @@ export const heroImage =
 
 const categoryBlueprint: CategoryNode[] = [
   {
-    slug: "women",
-    name: "Thoi Trang Nu",
+    slug: "mc-apparel",
+    name: "Thời trang",
     parentSlug: null,
     children: [
-      { slug: "ao-len", name: "Ao Len", parentSlug: "women" },
-      { slug: "ao-khoac", name: "Ao Khoac", parentSlug: "women" },
-      { slug: "vay", name: "Vay", parentSlug: "women" },
+      { slug: "tshirts", name: "Áo thun", parentSlug: "mc-apparel" },
+      { slug: "shirts", name: "Áo sơ mi", parentSlug: "mc-apparel" },
+      { slug: "jackets", name: "Áo khoác", parentSlug: "mc-apparel" },
+      { slug: "sweaters", name: "Áo len", parentSlug: "mc-apparel" },
+      { slug: "sweatshirts", name: "Áo nỉ", parentSlug: "mc-apparel" },
+      { slug: "dresses", name: "Váy đầm", parentSlug: "mc-apparel" },
+      { slug: "jeans", name: "Quần jeans", parentSlug: "mc-apparel" },
+      { slug: "shorts", name: "Quần short", parentSlug: "mc-apparel" },
+      { slug: "track-pants", name: "Quần thể thao", parentSlug: "mc-apparel" },
+      { slug: "trousers", name: "Quần tây", parentSlug: "mc-apparel" },
     ],
   },
   {
-    slug: "men",
-    name: "Thoi Trang Nam",
-    parentSlug: null,
-    children: [{ slug: "ao-so-mi", name: "Ao So Mi", parentSlug: "men" }],
-  },
-  {
-    slug: "unisex",
-    name: "Thoi Trang Unisex",
+    slug: "mc-footwear",
+    name: "Giày dép",
     parentSlug: null,
     children: [
-      { slug: "ao-thun", name: "Ao Thun", parentSlug: "unisex" },
-      { slug: "quan", name: "Quan", parentSlug: "unisex" },
-      { slug: "giay", name: "Giày", parentSlug: "unisex" },
+      { slug: "casual-shoes", name: "Giày thường ngày", parentSlug: "mc-footwear" },
+      { slug: "sports-shoes", name: "Giày thể thao", parentSlug: "mc-footwear" },
+      { slug: "formal-shoes", name: "Giày công sở", parentSlug: "mc-footwear" },
+      { slug: "heels", name: "Giày cao gót", parentSlug: "mc-footwear" },
+      { slug: "flats", name: "Giày bệt", parentSlug: "mc-footwear" },
+      { slug: "sandals", name: "Xăng đan", parentSlug: "mc-footwear" },
+      { slug: "flip-flops", name: "Dép xỏ ngón", parentSlug: "mc-footwear" },
     ],
   },
 ];
@@ -317,10 +337,21 @@ export function filterProducts(
   const results = filteredProducts.filter((product) => {
     if (
       query.category &&
-      product.category !== query.category &&
-      product.subcategory !== query.category
+      product.category !== query.category
     ) {
       return false;
+    }
+
+    if (query.gender) {
+      const includeUnisex = query.includeUnisex !== false;
+      const matchesGender = product.gender === query.gender;
+      const matchesUnisex =
+        includeUnisex &&
+        query.gender !== "unisex" &&
+        product.gender === "unisex";
+      if (!matchesGender && !matchesUnisex) {
+        return false;
+      }
     }
 
     if (

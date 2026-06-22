@@ -22,7 +22,7 @@ export function AdminLogin() {
           ? "/portal-admin/products"
           : role === "staff"
             ? "/staff"
-            : "/shop";
+            : "/";
       const target =
         role === "admin" || role === "staff"
           ? roleTarget
@@ -125,6 +125,7 @@ export function AdminLogin() {
                 Đăng ký
               </Link>
             </p>
+            <p><Link to="/forgot-password" className="font-medium text-neutral-900 underline">Quên mật khẩu?</Link></p>
             <p>Demo credentials:</p>
             <p className="font-mono text-neutral-900">Admin: admin / 123</p>
             <p className="font-mono text-neutral-900">User: user / 123</p>

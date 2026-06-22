@@ -41,17 +41,28 @@ def _collect_user_preferences(customer_id: int | None, session_id: str | None) -
     brand_counter = Counter()
     search_terms = Counter()
     search_term_recency = {}
+    search_term_bucket = {}
     product_interaction_count = Counter()
     product_recency = {}
+    product_bucket = {}
     category_recency = {}
+    category_bucket = {}
     interaction_count = 0
     latest_viewed_product_id = None
     latest_viewed_category_slug = None
     latest_viewed_brand_id = None
+    now = timezone.now()
 
     for event_index, event in enumerate(events):
         interaction_count += 1
         recency = 300 - event_index
+        age_days = (now - event.timestamp).total_seconds() / 86400
+        if age_days <= 2:
+            timeline_bucket = 0
+        elif age_days <= 14:
+            timeline_bucket = 1
+        else:
+            timeline_bucket = 2
         weight = float(event.score or 1)
         if event.interaction_type == 'search':
             weight = 0.5
@@ -70,16 +81,19 @@ def _collect_user_preferences(customer_id: int | None, session_id: str | None) -
 
         category_counter[event.product.category.slug] += weight
         category_recency.setdefault(event.product.category.slug, recency)
+        category_bucket.setdefault(event.product.category.slug, timeline_bucket)
         if event.product.brand_id:
             brand_counter[event.product.brand_id] += weight
         product_counter[event.product_id] += weight
         product_interaction_count[event.product_id] += 1
         product_recency.setdefault(event.product_id, recency)
+        product_bucket.setdefault(event.product_id, timeline_bucket)
         if event.interaction_type == 'search' and event.search_query:
             for term in event.search_query.lower().split():
                 if len(term) >= 2:
                     search_terms[term] += weight
                     search_term_recency.setdefault(term, recency)
+                    search_term_bucket.setdefault(term, timeline_bucket)
 
     return {
         'categories': category_counter,
@@ -87,9 +101,12 @@ def _collect_user_preferences(customer_id: int | None, session_id: str | None) -
         'brands': brand_counter,
         'search_terms': search_terms,
         'search_term_recency': search_term_recency,
+        'search_term_bucket': search_term_bucket,
         'product_interaction_count': product_interaction_count,
         'product_recency': product_recency,
+        'product_bucket': product_bucket,
         'category_recency': category_recency,
+        'category_bucket': category_bucket,
         'interaction_count': interaction_count,
         'latest_viewed_product_id': latest_viewed_product_id,
         'latest_viewed_category_slug': latest_viewed_category_slug,
@@ -134,9 +151,6 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
     parsed_user_id = _parse_user(user_id)
     customer_id = Customer.objects.filter(user_id=parsed_user_id).values_list('customer_id', flat=True).first()
     search = (search or '').strip()
-    precomputed = [] if search else _precomputed_recommendations(customer_id, session_id, limit)
-    if precomputed:
-        return precomputed
 
     preferences = _collect_user_preferences(customer_id, session_id)
 
@@ -146,6 +160,7 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
         for term in [t for t in search.lower().split() if len(t) >= 2]:
             preferences['search_terms'][term] += 6
             preferences['search_term_recency'][term] = 1000
+            preferences['search_term_bucket'][term] = 0
 
     available_variants = ProductVariant.objects.filter(
         product_id=OuterRef('pk'),
@@ -177,7 +192,7 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
         )
         return _hydrated_products([product.product_id for product in cold_start[:limit]])
 
-    scored = []
+    scored_by_bucket = {0: [], 1: [], 2: [], 3: []}
     for product in products:
         searchable_text = f'{product.name} {product.feature_text} {product.tags}'.lower()
         matching_terms = [
@@ -188,9 +203,15 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
             (preferences['search_term_recency'][term] for term in matching_terms),
             default=0,
         )
+        search_bucket = min(
+            (preferences['search_term_bucket'][term] for term in matching_terms),
+            default=None,
+        )
         direct_recency = preferences['product_recency'].get(product.product_id, 0)
+        direct_bucket = preferences['product_bucket'].get(product.product_id)
         category_interest = preferences['categories'][product.category.slug]
         category_recency = preferences['category_recency'].get(product.category.slug, 0)
+        product_category_bucket = preferences['category_bucket'].get(product.category.slug)
         search_interest = sum(preferences['search_terms'][term] for term in matching_terms)
         brand_interest = preferences['brands'][product.brand_id]
 
@@ -203,32 +224,59 @@ def get_for_you_recommendations(user_id: str | None, session_id: str | None = No
             popularity += 1.5
         popularity += int(float(product.average_rating) * 3)
 
-        # Feed order is intentionally lexicographic: recent behavior first,
-        # then repeated/strong interactions, then category affinity. Popularity
-        # only breaks ties so every customer keeps a distinct real-time feed.
-        rank = (
-            max(direct_recency, search_recency),
-            preferences['products'][product.product_id],
-            preferences['product_interaction_count'][product.product_id],
-            search_interest,
-            category_interest,
-            category_recency,
-            brand_interest,
-            popularity,
+        bucket_candidates = [
+            item for item in [direct_bucket, search_bucket, product_category_bucket]
+            if item is not None
+        ]
+        timeline_bucket = min(bucket_candidates) if bucket_candidates else 3
+        score = (
+            max(direct_recency, search_recency) * 2
+            + preferences['products'][product.product_id] * 80
+            + preferences['product_interaction_count'][product.product_id] * 25
+            + search_interest * 45
+            + category_interest * 10
+            + category_recency * 0.35
+            + brand_interest * 6
+            + popularity
         )
-        scored.append((rank, product.product_id))
+        scored_by_bucket[timeline_bucket].append((score, product.product_id))
 
-    scored.sort(key=lambda item: item[0], reverse=True)
-    picked_ids = [product_id for _, product_id in scored[:limit]]
+    for bucket_items in scored_by_bucket.values():
+        bucket_items.sort(key=lambda item: item[0], reverse=True)
+
+    picked_ids = []
+    seen_ids = set()
+
+    def take_from_bucket(bucket: int, count: int) -> None:
+        for _, product_id in scored_by_bucket[bucket]:
+            if len(picked_ids) >= limit:
+                return
+            if product_id in seen_ids:
+                continue
+            picked_ids.append(product_id)
+            seen_ids.add(product_id)
+            count -= 1
+            if count <= 0:
+                return
+
+    # TikTok Shop-like timeline: keep recent intent dominant, while reserving
+    # space for previous and older interests instead of letting one fresh topic
+    # consume the whole feed.
+    quotas = {
+        0: max(1, int(limit * 0.45)),
+        1: max(1, int(limit * 0.25)),
+        2: max(1, int(limit * 0.15)),
+        3: limit,
+    }
+    for bucket in [0, 1, 2, 3]:
+        take_from_bucket(bucket, quotas[bucket])
+
     if len(picked_ids) < limit:
-        picked_ids.extend(
-            product.product_id
-            for product in products
-            if product.product_id not in picked_ids
-        )
+        for bucket in [0, 1, 2, 3]:
+            take_from_bucket(bucket, limit - len(picked_ids))
 
     # Preserve scored order for queryset output.
-    return _hydrated_products(picked_ids)
+    return _hydrated_products(picked_ids[:limit])
 
 
 def get_related_products(product_id: str, limit: int = 4) -> list[Product]:

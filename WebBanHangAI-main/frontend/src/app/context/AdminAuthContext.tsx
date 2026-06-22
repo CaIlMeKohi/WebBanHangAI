@@ -10,6 +10,13 @@ interface RegisteredUser {
   userId?: number;
 }
 
+interface StoredAuth {
+  username?: string;
+  role?: AuthRole;
+  userId?: number | null;
+  access?: string | null;
+}
+
 interface AuthContextType {
   isAuthReady: boolean;
   isLoggedIn: boolean;
@@ -31,6 +38,9 @@ interface AuthContextType {
   }) => Promise<{
     success: boolean;
     error?: string;
+    requiresOtp?: boolean;
+    email?: string;
+    devOtp?: string;
   }>;
   logout: () => void;
 }
@@ -45,6 +55,26 @@ const AUTH_CREDENTIALS = {
 const AUTH_STORAGE_KEY = "siteAuth";
 const LEGACY_AUTH_STORAGE_KEY = "adminAuth";
 const REGISTERED_USERS_STORAGE_KEY = "siteRegisteredUsers";
+
+function readStoredAuth(): StoredAuth | null {
+  for (const key of [AUTH_STORAGE_KEY, LEGACY_AUTH_STORAGE_KEY]) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as StoredAuth;
+      const access =
+        typeof parsed.access === "string" && parsed.access.trim()
+          ? parsed.access.trim()
+          : null;
+      if (parsed.username && parsed.role && access) {
+        return { ...parsed, access };
+      }
+    } catch {
+      localStorage.removeItem(key);
+    }
+  }
+  return null;
+}
 
 function readRegisteredUsers(): RegisteredUser[] {
   try {
@@ -68,19 +98,13 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
 
   // Check localStorage on mount
   useEffect(() => {
-    const savedAuth =
-      localStorage.getItem(AUTH_STORAGE_KEY) ??
-      localStorage.getItem(LEGACY_AUTH_STORAGE_KEY);
+    const savedAuth = readStoredAuth();
     if (!savedAuth) {
       setIsAuthReady(true);
       return;
     }
 
-    const { username, role, userId } = JSON.parse(savedAuth) as {
-      username?: string;
-      role?: AuthRole;
-      userId?: number | null;
-    };
+    const { username, role, userId } = savedAuth;
 
     setUsername(username ?? null);
     setRole(role ?? null);
@@ -88,6 +112,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoggedIn(Boolean(username));
     setIsAuthReady(true);
 
+    // Keep the current page on session restore so admins can browse the storefront.
   }, []);
 
   const applyUser = (
@@ -109,6 +134,9 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         access: access ?? null,
       }),
     );
+    localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+    // Redirect is handled by the login/register pages so `next` can return users
+    // to the page they were viewing before authentication.
   };
 
   const roleFromApiUser = (user: ApiUser): AuthRole =>
@@ -121,6 +149,9 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const response = await loginUser(inputUsername, inputPassword);
       const apiUser = response.user;
+      if (!response.access) {
+        return false;
+      }
       applyUser(
         apiUser.username,
         roleFromApiUser(apiUser),
@@ -194,23 +225,12 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         username: normalizedUsername,
         password: inputPassword,
       });
-      const apiUser = response.user;
-      const newUser: RegisteredUser = {
-        username: normalizedUsername,
-        password: inputPassword,
-        role: "user",
-        userId: apiUser.user_id,
+      return {
+        success: true,
+        requiresOtp: response.requires_otp,
+        email: response.email,
+        devOtp: response.dev_otp,
       };
-
-      const nextUsers = [...users, newUser];
-      writeRegisteredUsers(nextUsers);
-      applyUser(
-        apiUser.username,
-        roleFromApiUser(apiUser),
-        apiUser.user_id,
-        response.access,
-      );
-      return { success: true };
     } catch (error) {
       return {
         success: false,
@@ -237,6 +257,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     setIsLoggedIn(false);
     localStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
+    window.location.href = "/login";
   };
 
   return (

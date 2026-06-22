@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { X, AlertCircle } from "lucide-react";
-import { createAdminProduct, updateAdminProduct } from "../../lib/api";
+import { X, AlertCircle, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { createAdminProduct, fetchBrands, fetchCategories, updateAdminProduct, type BrandOption } from "../../lib/api";
 import type { AdminProduct } from "../../types/admin";
+import type { CategoryNode } from "../../data/products";
 import {
-  ADMIN_PRODUCT_BRANDS,
-  ADMIN_PRODUCT_CATEGORIES,
   appendAdminProductFormData,
   createAdminProductFormState,
+  formatMoneyInput,
+  parseMoneyInput,
   type AdminProductFormState,
 } from "../../lib/adminProducts";
 
@@ -28,6 +29,10 @@ export function ProductAdminForm({
   const [formData, setFormData] = useState<AdminProductFormState>(
     createAdminProductFormState(product),
   );
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [brandSearch, setBrandSearch] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +40,43 @@ export function ProductAdminForm({
     setImagePreview(product?.image || "");
     setImageFile(null);
   }, [product]);
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all([fetchCategories(), fetchBrands()])
+      .then(([categoryItems, brandItems]) => {
+        if (!isMounted) return;
+        setCategories(
+          categoryItems
+            .flatMap((item) => (item.children?.length ? item.children : [item]))
+            .filter((item) => typeof item.id === "number"),
+        );
+        setBrands(brandItems);
+      })
+      .catch(() => {
+        if (isMounted) {
+          setCategories([]);
+          setBrands([]);
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const selectedCategory = categories.find(
+      (category) => category.id === formData.category_id,
+    );
+    if (selectedCategory) setCategorySearch(selectedCategory.name);
+  }, [categories, formData.category_id]);
+
+  useEffect(() => {
+    const selectedBrand = brands.find(
+      (brand) => (brand.brand_id ?? brand.id) === formData.brand_id,
+    );
+    if (selectedBrand) setBrandSearch(selectedBrand.name);
+  }, [brands, formData.brand_id]);
 
   useEffect(() => {
     return () => {
@@ -48,11 +90,16 @@ export function ProductAdminForm({
     >,
   ) => {
     const { name, value } = e.target;
+    const type = e.target instanceof HTMLInputElement ? e.target.type : "";
+    const checked =
+      e.target instanceof HTMLInputElement ? e.target.checked : false;
     setFormData((prev) => ({
       ...prev,
       [name]:
+        type === "checkbox"
+          ? checked
+          :
         name === "price" ||
-        name === "sale_price" ||
         name === "stock_quantity" ||
         name === "category_id" ||
         name === "brand_id"
@@ -71,6 +118,31 @@ export function ProductAdminForm({
     setImagePreview(file ? URL.createObjectURL(file) : product?.image || "");
   };
 
+  const updateVariant = (index: number, field: "size" | "stock_quantity", value: string) => {
+    setFormData((current) => ({
+      ...current,
+      variants: current.variants.map((variant, variantIndex) =>
+        variantIndex === index
+          ? { ...variant, [field]: field === "stock_quantity" ? Math.max(0, Number(value)) : value }
+          : variant,
+      ),
+    }));
+  };
+
+  const addVariant = () => {
+    setFormData((current) => ({
+      ...current,
+      variants: [...current.variants, { size: "", stock_quantity: 0 }],
+    }));
+  };
+
+  const removeVariant = (index: number) => {
+    setFormData((current) => ({
+      ...current,
+      variants: current.variants.filter((_, variantIndex) => variantIndex !== index),
+    }));
+  };
+
   const isCreating = !product;
   const submitLabel = useMemo(
     () =>
@@ -85,11 +157,19 @@ export function ProductAdminForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!formData.category_id) {
+      setError("Vui lòng chọn một danh mục có trong danh sách gợi ý");
+      return;
+    }
+    if (!formData.brand_id) {
+      setError("Vui lòng chọn một thương hiệu có trong danh sách");
+      return;
+    }
     setIsLoading(true);
 
     try {
       const payload = new FormData();
-      appendAdminProductFormData(payload, formData, imageFile);
+      appendAdminProductFormData(payload, formData, imageFile, isCreating);
 
       if (product) {
         await updateAdminProduct(product.id, payload);
@@ -169,46 +249,41 @@ export function ProductAdminForm({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div>
             <div>
               <label className="block text-sm font-medium mb-2">Giá *</label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 name="price"
-                value={formData.price}
-                onChange={handleChange}
+                value={formatMoneyInput(formData.price)}
+                onChange={(event) => setFormData((current) => ({ ...current, price: parseMoneyInput(event.target.value) }))}
                 required
-                min="0"
                 className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Giá khuyến mãi
-              </label>
-              <input
-                type="number"
-                name="sale_price"
-                value={formData.sale_price || ""}
-                onChange={handleChange}
-                min="0"
-                className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
+          </div>
+
+          <div className="rounded-lg border border-neutral-200 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-medium">Size và tồn kho *</h3>
+                <p className="mt-1 text-xs text-neutral-500">Mỗi size tương ứng với một biến thể trong kho.</p>
+              </div>
+              <button type="button" onClick={addVariant} className="inline-flex items-center gap-2 rounded border px-3 py-2 text-sm hover:bg-neutral-50">
+                <Plus className="h-4 w-4" /> Thêm size
+              </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Tồn kho *
-              </label>
-              <input
-                type="number"
-                name="stock_quantity"
-                value={formData.stock_quantity}
-                onChange={handleChange}
-                required
-                min="0"
-                className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              />
+            <div className="space-y-3">
+              {formData.variants.map((variant, index) => (
+                <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-end gap-3">
+                  <label className="text-sm">Size<input required value={variant.size} onChange={(event) => updateVariant(index, "size", event.target.value)} placeholder="VD: S, M, L, 39" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 uppercase" /></label>
+                  <label className="text-sm">Tồn kho<input required type="number" min="0" value={variant.stock_quantity} onChange={(event) => updateVariant(index, "stock_quantity", event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" /></label>
+                  <button type="button" onClick={() => removeVariant(index)} disabled={formData.variants.length === 1} className="rounded-lg border border-red-200 p-2.5 text-red-600 disabled:opacity-40" aria-label="Xóa size"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              ))}
             </div>
+            <div className="mt-3 text-sm text-neutral-600">Tổng tồn kho: <strong>{formData.variants.reduce((sum, variant) => sum + Number(variant.stock_quantity || 0), 0)}</strong></div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -216,37 +291,58 @@ export function ProductAdminForm({
               <label className="block text-sm font-medium mb-2">
                 Danh mục *
               </label>
+              <AutocompleteCombobox
+                value={categorySearch}
+                options={categories.flatMap((category) =>
+                  typeof category.id === "number" ? [{ id: category.id, name: category.name }] : [],
+                )}
+                placeholder="Nhập hoặc chọn danh mục..."
+                label="danh mục"
+                onValueChange={(value, selectedId) => {
+                  setCategorySearch(value);
+                  setFormData((current) => ({ ...current, category_id: selectedId }));
+                }}
+              />
+              {categorySearch && !formData.category_id && (
+                <p className="mt-1 text-xs text-amber-700">Hãy chọn một danh mục có trong danh sách gợi ý.</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Gioi tinh *
+              </label>
               <select
-                name="category_id"
-                value={formData.category_id}
+                name="gender"
+                value={formData.gender}
                 onChange={handleChange}
                 required
                 className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
               >
-                {ADMIN_PRODUCT_CATEGORIES.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
+                <option value="unisex">Unisex</option>
+                <option value="men">Do nam</option>
+                <option value="women">Do nu</option>
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium mb-2">
-                Thương hiệu
+                Thương hiệu *
               </label>
-              <select
-                name="brand_id"
-                value={formData.brand_id || ""}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              >
-                <option value="">Chọn thương hiệu</option>
-                {ADMIN_PRODUCT_BRANDS.map((brand) => (
-                  <option key={brand.id} value={brand.id}>
-                    {brand.name}
-                  </option>
-                ))}
-              </select>
+              <AutocompleteCombobox
+                value={brandSearch}
+                options={brands.flatMap((brand) => {
+                  const id = brand.brand_id ?? brand.id;
+                  return typeof id === "number" ? [{ id, name: brand.name }] : [];
+                })}
+                placeholder="Nhập hoặc chọn thương hiệu..."
+                label="thương hiệu"
+                onValueChange={(value, selectedId) => {
+                  setBrandSearch(value);
+                  setFormData((current) => ({ ...current, brand_id: selectedId }));
+                }}
+              />
+              {brandSearch && !formData.brand_id && (
+                <p className="mt-1 text-xs text-amber-700">Hãy chọn một thương hiệu có trong danh sách gợi ý.</p>
+              )}
             </div>
           </div>
 
@@ -261,6 +357,25 @@ export function ProductAdminForm({
               onChange={handleChange}
               className="w-full px-3 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900"
             />
+          </div>
+
+          <div className="rounded-lg border border-neutral-200 p-4">
+            <label className="flex items-center gap-3 text-sm font-medium">
+              <input
+                type="checkbox"
+                name="is_new"
+                checked={isCreating ? true : formData.is_new}
+                onChange={handleChange}
+                disabled={isCreating}
+                className="h-4 w-4 rounded border-neutral-300"
+              />
+              Sản phẩm mới
+            </label>
+            {isCreating && (
+              <p className="mt-2 text-xs text-neutral-500">
+                Sản phẩm mới tạo sẽ tự động được đánh dấu là sản phẩm mới.
+              </p>
+            )}
           </div>
 
           <div>
@@ -301,6 +416,78 @@ export function ProductAdminForm({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+function AutocompleteCombobox({
+  value,
+  options,
+  placeholder,
+  label,
+  onValueChange,
+}: {
+  value: string;
+  options: Array<{ id: number; name: string }>;
+  placeholder: string;
+  label: string;
+  onValueChange: (value: string, selectedId: number | null) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const normalizedValue = value.trim().toLowerCase();
+  const filteredOptions = options.filter((option) =>
+    option.name.toLowerCase().includes(normalizedValue),
+  );
+
+  function updateValue(nextValue: string) {
+    const matched = options.find(
+      (option) => option.name.toLowerCase() === nextValue.trim().toLowerCase(),
+    );
+    onValueChange(nextValue, matched?.id ?? null);
+    setIsOpen(true);
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 120)}
+        onChange={(event) => updateValue(event.target.value)}
+        placeholder={placeholder}
+        autoComplete="off"
+        className="w-full rounded-lg border border-neutral-300 px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+      />
+      <button
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setIsOpen((current) => !current)}
+        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-neutral-500 hover:text-neutral-900"
+        aria-label={`Mở danh sách ${label}`}
+      >
+        <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+      {isOpen && (
+        <div className="absolute left-0 top-full z-40 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-lg">
+          {filteredOptions.length ? filteredOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onValueChange(option.name, option.id);
+                setIsOpen(false);
+              }}
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-neutral-100"
+            >
+              {option.name}
+            </button>
+          )) : (
+            <div className="px-3 py-2 text-sm text-neutral-500">Không tìm thấy {label} phù hợp.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

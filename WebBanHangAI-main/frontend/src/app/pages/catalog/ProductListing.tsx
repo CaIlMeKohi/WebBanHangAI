@@ -12,7 +12,7 @@ import {
 import { useCatalog } from "../../hooks/useCatalog";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import { writeRecommendationSearch } from "../../lib/recommendationStorage";
-import { fetchCategories } from "../../lib/api";
+import { fetchBrands, fetchCategories, type BrandOption } from "../../lib/api";
 import { formatCurrency } from "../../lib/productPresentation";
 
 const MIN_PRICE = 0;
@@ -26,8 +26,25 @@ const sortOptions: Array<{ value: ProductSort; label: string }> = [
   { value: "price_desc", label: "Giá giảm dần" },
 ];
 
-function flattenChildCategories(categories: CategoryNode[]) {
-  return categories.flatMap((category) => category.children ?? []);
+const genderLabels: Record<string, string> = {
+  men: "Đồ nam",
+  women: "Đồ nữ",
+  unisex: "Unisex",
+};
+
+function flattenCategories(items: CategoryNode[]): CategoryNode[] {
+  return items.flatMap((item) => [item, ...flattenCategories(item.children ?? [])]);
+}
+
+function findCategoryBySlug(items: CategoryNode[], slug?: string) {
+  if (!slug) return undefined;
+  return flattenCategories(items).find((item) => item.slug === slug);
+}
+
+function getProductTypeCategories(items: CategoryNode[]) {
+  return flattenCategories(items).filter(
+    (item) => !item.children?.length && (item.productCount ?? 0) > 0,
+  );
 }
 
 export function ProductListing() {
@@ -40,9 +57,21 @@ export function ProductListing() {
   );
   const [sortBy, setSortBy] = useState<ProductSort>("featured");
   const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [brandSearch, setBrandSearch] = useState("");
 
-  const category = searchParams.get("category") ?? undefined;
+  const rawCategory = searchParams.get("category") ?? undefined;
+  const rawGender = searchParams.get("gender") ?? undefined;
+  const legacyGender =
+    rawCategory === "men" || rawCategory === "women" ? rawCategory : undefined;
+  const gender =
+    rawGender === "men" || rawGender === "women" || rawGender === "unisex"
+      ? rawGender
+      : legacyGender;
+  const category = legacyGender ? undefined : rawCategory;
   const searchQuery = searchParams.get("search") ?? undefined;
+  const selectedBrand = searchParams.get("brand") ?? undefined;
+  const isBrandMode = searchParams.get("filter") === "brand" || Boolean(selectedBrand);
   const isNew = ["true", "1"].includes(searchParams.get("new") ?? "");
   const isSale = ["true", "1"].includes(searchParams.get("sale") ?? "");
   const currentPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
@@ -52,10 +81,12 @@ export function ProductListing() {
 
     async function loadCategories() {
       try {
-        const apiCategories = await fetchCategories();
-        if (isMounted && apiCategories.length > 0) {
-          setCategories(apiCategories);
-        }
+        const [apiCategories, apiBrands] = await Promise.all([
+          fetchCategories(),
+          fetchBrands(),
+        ]);
+        if (isMounted && apiCategories.length > 0) setCategories(apiCategories);
+        if (isMounted) setBrands(apiBrands);
       } catch {
         if (isMounted) setCategories([]);
       }
@@ -68,31 +99,40 @@ export function ProductListing() {
     };
   }, []);
 
-  const activeRootCategory = useMemo(() => {
-    return categories.find((item) => item.slug === category);
+  const activeCategory = useMemo(() => {
+    return findCategoryBySlug(categories, category);
   }, [categories, category]);
 
-  const availableSubcategories = useMemo(() => {
-    if (activeRootCategory?.children?.length) {
-      return activeRootCategory.children;
-    }
-
-    return flattenChildCategories(categories);
-  }, [activeRootCategory, categories]);
+  const productTypeCategories = useMemo(
+    () => getProductTypeCategories(categories),
+    [categories],
+  );
+  const availableSubcategories = productTypeCategories;
 
   useEffect(() => {
     const allowedSlugs = new Set(
-      availableSubcategories.map((item) => item.slug),
+      productTypeCategories.map((item) => item.slug),
     );
     setSelectedSubcategories((currentValue) =>
       currentValue.filter((slug) => allowedSlugs.has(slug)),
     );
-  }, [availableSubcategories]);
+  }, [productTypeCategories]);
+
+  useEffect(() => {
+    if (!selectedBrand) {
+      setBrandSearch("");
+      return;
+    }
+    const brand = brands.find((item) => item.slug === selectedBrand);
+    if (brand) setBrandSearch(brand.name);
+  }, [brands, selectedBrand]);
 
   const catalogQuery = useMemo<CatalogQuery>(() => {
     return {
       category,
+      gender,
       search: searchQuery,
+      brand: selectedBrand,
       isNew,
       isSale,
       subcategory:
@@ -101,15 +141,17 @@ export function ProductListing() {
       maxPrice: priceRange[1] < MAX_PRICE ? priceRange[1] : undefined,
       sort: sortBy,
       page: currentPage,
-      includeUnisex: category === "men" || category === "women",
+      includeUnisex: gender === "men" || gender === "women",
     };
   }, [
     category,
+    gender,
     currentPage,
     isNew,
     isSale,
     priceRange,
     searchQuery,
+    selectedBrand,
     selectedSubcategories,
     sortBy,
   ]);
@@ -119,9 +161,17 @@ export function ProductListing() {
 
   const activeFilterCount =
     selectedSubcategories.length +
+    Number(Boolean(selectedBrand)) +
     Number(priceRange[0] > MIN_PRICE || priceRange[1] < MAX_PRICE);
 
-  const handleRootCategoryChange = (nextCategory?: string) => {
+  const filteredBrands = useMemo(() => {
+    const keyword = brandSearch.trim().toLowerCase();
+    return brands.filter((brand) =>
+      keyword ? brand.name.toLowerCase().includes(keyword) : true,
+    );
+  }, [brandSearch, brands]);
+
+  const handleCategoryChange = (nextCategory?: string) => {
     const nextSearchParams = new URLSearchParams(searchParams);
 
     if (nextCategory) {
@@ -130,8 +180,51 @@ export function ProductListing() {
       nextSearchParams.delete("category");
     }
 
+    nextSearchParams.delete("brand");
+    nextSearchParams.delete("filter");
+    nextSearchParams.delete("page");
     setSearchParams(nextSearchParams);
     setSelectedSubcategories([]);
+  };
+  const handleRootCategoryChange = handleCategoryChange;
+
+  const handleBrandMode = () => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("filter", "brand");
+    nextSearchParams.delete("category");
+    nextSearchParams.delete("page");
+    setSearchParams(nextSearchParams);
+    setSelectedSubcategories([]);
+  };
+
+  const handleBrandChange = (brandSlug?: string) => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set("filter", "brand");
+    if (brandSlug) {
+      nextSearchParams.set("brand", brandSlug);
+    } else {
+      nextSearchParams.delete("brand");
+    }
+    nextSearchParams.delete("page");
+    setSearchParams(nextSearchParams);
+  };
+
+  const handleGenderChange = (nextGender?: string) => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("category");
+
+    if (category) {
+      nextSearchParams.set("category", category);
+    }
+
+    if (nextGender) {
+      nextSearchParams.set("gender", nextGender);
+    } else {
+      nextSearchParams.delete("gender");
+    }
+
+    nextSearchParams.delete("page");
+    setSearchParams(nextSearchParams);
   };
 
   const toggleSubcategory = (subcategorySlug: string) => {
@@ -142,6 +235,17 @@ export function ProductListing() {
 
       return [...currentValue, subcategorySlug];
     });
+    goToPage(1);
+  };
+
+  const handleSortChange = (nextSort: ProductSort) => {
+    setSortBy(nextSort);
+    goToPage(1);
+  };
+
+  const handlePriceRangeChange = (nextValue: number[]) => {
+    setPriceRange(nextValue);
+    resetPageWithoutScroll();
   };
 
   const goToPage = (page: number) => {
@@ -155,12 +259,30 @@ export function ProductListing() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const resetPageWithoutScroll = () => {
+    if (currentPage <= 1) return;
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("page");
+    setSearchParams(nextSearchParams);
+  };
+
   const resetLocalFilters = () => {
     setSelectedSubcategories([]);
     setPriceRange([MIN_PRICE, MAX_PRICE]);
     setSortBy("featured");
-    goToPage(1);
+    setBrandSearch("");
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("brand");
+    nextSearchParams.delete("filter");
+    nextSearchParams.delete("page");
+    setSearchParams(nextSearchParams);
   };
+
+  useEffect(() => {
+    if (currentPage > 1 && error?.toLowerCase().includes("invalid page")) {
+      goToPage(1);
+    }
+  }, [currentPage, error]);
 
   const pageTitle = (() => {
     if (searchQuery) {
@@ -172,8 +294,17 @@ export function ProductListing() {
     if (isSale) {
       return "Sản phẩm đang giảm giá";
     }
-    if (activeRootCategory) {
-      return activeRootCategory.name;
+    if (selectedBrand) {
+      return `Thương hiệu ${brands.find((brand) => brand.slug === selectedBrand)?.name ?? selectedBrand}`;
+    }
+    if (activeCategory && gender) {
+      return `${genderLabels[gender]} - ${activeCategory.name}`;
+    }
+    if (gender) {
+      return genderLabels[gender];
+    }
+    if (activeCategory) {
+      return activeCategory.name;
     }
     return "Tất cả sản phẩm";
   })();
@@ -220,7 +351,9 @@ export function ProductListing() {
             </span>
             <select
               value={sortBy}
-              onChange={(event) => setSortBy(event.target.value as ProductSort)}
+              onChange={(event) =>
+                handleSortChange(event.target.value as ProductSort)
+              }
               className="border border-neutral-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:focus:ring-neutral-400"
             >
               {sortOptions.map((option) => (
@@ -244,14 +377,24 @@ export function ProductListing() {
                     <button
                       onClick={() => handleRootCategoryChange(undefined)}
                       className={`rounded-full border px-3 py-2 text-sm transition-colors ${
-                        !category
+                        !category && !isBrandMode
                           ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900"
                           : "border-neutral-300 hover:border-neutral-900 dark:border-neutral-700 dark:hover:border-white"
                       }`}
                     >
                       Tất cả
                     </button>
-                    {categories.map((rootCategory) => (
+                    <button
+                      onClick={handleBrandMode}
+                      className={`rounded-full border px-3 py-2 text-sm transition-colors ${
+                        isBrandMode
+                          ? "border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900"
+                          : "border-neutral-300 hover:border-neutral-900 dark:border-neutral-700 dark:hover:border-white"
+                      }`}
+                    >
+                      Thương hiệu
+                    </button>
+                    {!isBrandMode && categories.map((rootCategory) => (
                       <button
                         key={rootCategory.slug}
                         onClick={() =>
@@ -278,6 +421,45 @@ export function ProductListing() {
                   <h3 className="mb-3 text-sm font-medium tracking-wide">
                     DANH MỤC SẢN PHẨM
                   </h3>
+                  {isBrandMode ? (
+                    <div className="space-y-3">
+                      <input
+                        list="shop-brand-options"
+                        value={brandSearch}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setBrandSearch(value);
+                          const matched = brands.find(
+                            (brand) => brand.name.toLowerCase() === value.trim().toLowerCase(),
+                          );
+                          if (matched?.slug) handleBrandChange(matched.slug);
+                        }}
+                        placeholder="Nhập hoặc chọn thương hiệu..."
+                        className="w-full rounded border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-800"
+                      />
+                      <datalist id="shop-brand-options">
+                        {brands.map((brand) => (
+                          <option key={brand.brand_id} value={brand.name} />
+                        ))}
+                      </datalist>
+                      <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                        {filteredBrands.map((brand) => (
+                          <label key={brand.brand_id} className="flex cursor-pointer items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedBrand === brand.slug}
+                              onChange={() => handleBrandChange(selectedBrand === brand.slug ? undefined : brand.slug)}
+                              className="h-4 w-4 rounded border-neutral-300 focus:ring-2 focus:ring-neutral-900"
+                            />
+                            <span className="text-sm">{brand.name}</span>
+                          </label>
+                        ))}
+                        {filteredBrands.length === 0 && (
+                          <div className="text-sm text-neutral-500">Không tìm thấy thương hiệu phù hợp.</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
                   <div className="space-y-2">
                     {availableSubcategories.map((subcategory) => (
                       <label
@@ -303,6 +485,7 @@ export function ProductListing() {
                       </label>
                     ))}
                   </div>
+                  )}
                 </div>
 
                 <div>
@@ -312,13 +495,13 @@ export function ProductListing() {
                   <div className="px-2">
                     <Slider
                       value={priceRange}
-                      onValueChange={(nextValue) => setPriceRange(nextValue)}
+                      onValueChange={handlePriceRangeChange}
                       min={MIN_PRICE}
                       max={MAX_PRICE}
                       step={100_000}
                       className="mb-3"
                     />
-                    <div className="flex justify-between gap-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    <div className="flex justify-between gap-4 text-sm font-medium text-neutral-700 dark:text-neutral-200">
                       <span>{formatCurrency(priceRange[0])}</span>
                       <span>{formatCurrency(priceRange[1])}</span>
                     </div>

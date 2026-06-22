@@ -1,5 +1,6 @@
 import { useNavigate, useSearchParams } from "react-router";
 import { CheckCircle2 } from "lucide-react";
+import { confirmMockPayment } from "../../lib/api";
 
 export function MockPaymentGateway() {
   const [params] = useSearchParams();
@@ -8,7 +9,9 @@ export function MockPaymentGateway() {
   const amount = Number(params.get("amount") ?? 0);
   const returnTo = params.get("returnTo") ?? "/cart";
 
-  function confirm() {
+  async function confirm() {
+    if (!orderId) return;
+    await confirmMockPayment(orderId);
     navigate(`${returnTo}?payment=success&orderId=${orderId}`, {
       replace: true,
     });
@@ -36,7 +39,7 @@ export function MockPaymentGateway() {
           </div>
         </div>
         <button
-          onClick={confirm}
+          onClick={() => void confirm()}
           disabled={!orderId}
           className="mt-6 w-full rounded-md bg-neutral-950 px-4 py-3 font-medium text-white disabled:opacity-50"
         >
