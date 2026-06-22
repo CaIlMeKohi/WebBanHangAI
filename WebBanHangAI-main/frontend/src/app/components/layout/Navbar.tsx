@@ -62,8 +62,8 @@ export function Navbar() {
     }
 
     async function loadWishlistCount() {
-      const localWishlistIds = readStoredWishlistIds();
-      if (hasStoredWishlistIds()) {
+      const localWishlistIds = readStoredWishlistIds(userId);
+      if (hasStoredWishlistIds(userId)) {
         if (isMounted) {
           setWishlistCount(localWishlistIds.length);
         }
@@ -79,6 +79,7 @@ export function Navbar() {
           if (wishlistItems.length > 0) {
             writeStoredWishlistIds(
               wishlistItems.map((item) => String(item.product.id)),
+              userId,
             );
           }
           return;

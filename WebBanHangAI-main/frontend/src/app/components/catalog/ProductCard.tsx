@@ -38,14 +38,14 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
 
   useEffect(() => {
     const syncLikedState = () => {
-      setIsLiked(readStoredWishlistIds().includes(String(product.id)));
+      setIsLiked(readStoredWishlistIds(userId).includes(String(product.id)));
     };
 
     syncLikedState();
     window.addEventListener(WISHLIST_UPDATED_EVENT, syncLikedState);
     return () =>
       window.removeEventListener(WISHLIST_UPDATED_EVENT, syncLikedState);
-  }, [product.id]);
+  }, [product.id, userId]);
 
   const handleQuickAdd = async () => {
     const size = product.sizes[0] ?? "STD";
@@ -75,12 +75,12 @@ export function ProductCard({ product, isRecommendation = false }: ProductCardPr
   const handleWishlist = () => {
     if (userId) {
       if (isLiked) {
-        removeStoredWishlistId(String(product.id));
+        removeStoredWishlistId(String(product.id), userId);
         setIsLiked(false);
         return;
       }
 
-      addStoredWishlistId(String(product.id));
+      addStoredWishlistId(String(product.id), userId);
       setIsLiked(true);
       void addWishlistItem(userId, product.id).catch(() => undefined);
       return;

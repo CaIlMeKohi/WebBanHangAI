@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   ArrowRight,
@@ -329,7 +329,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
         {!embedded && <h1 className="mb-6 text-3xl font-light tracking-wide">Giỏ hàng</h1>}
 
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-neutral-900 dark:text-neutral-100">
             <input
               type="checkbox"
               checked={selectedIds.length === items.length}
@@ -346,7 +346,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
           <button
             onClick={() => void removeSelected()}
             disabled={selectedIds.length === 0}
-            className="inline-flex items-center gap-2 rounded border border-red-200 px-3 py-2 text-sm text-red-700 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded border border-red-200 px-3 py-2 text-sm text-red-700 disabled:opacity-50 dark:border-red-900/50 dark:text-red-300"
           >
             <Trash2 className="h-4 w-4" />
             Xóa sản phẩm đã chọn
@@ -358,7 +358,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
             {items.map((item) => (
               <div
                 key={item.cart_item_id}
-                className="flex gap-4 border border-neutral-200 p-4 dark:border-neutral-800"
+                className="flex gap-4 border border-neutral-200 bg-white p-4 text-neutral-950 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white"
               >
                 <input
                   type="checkbox"
@@ -391,31 +391,31 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
                       >
                         {item.product.name}
                       </Link>
-                      <div className="mt-1 text-sm text-neutral-600">
+                      <div className="mt-1 text-sm text-neutral-600 dark:text-neutral-300">
                         Kích cỡ: {item.size} · Màu: {item.color}
                       </div>
                     </div>
                     <button
                       onClick={() => void removeOne(item.cart_item_id)}
-                      className="rounded p-1 hover:bg-neutral-100"
+                      className="rounded p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800"
                     >
                       <X className="h-5 w-5" />
                     </button>
                   </div>
                   <div className="mt-4 flex items-center justify-between">
-                    <div className="flex items-center border border-neutral-300">
+                    <div className="flex items-center border border-neutral-300 dark:border-neutral-700">
                       <button
                         onClick={() => void changeQuantity(item, -1)}
-                        className="p-2 hover:bg-neutral-50"
+                        className="p-2 hover:bg-neutral-50 dark:hover:bg-neutral-800"
                       >
                         <Minus className="h-4 w-4" />
                       </button>
-                      <span className="min-w-12 border-x border-neutral-300 px-4 py-2 text-center">
+                      <span className="min-w-12 border-x border-neutral-300 px-4 py-2 text-center dark:border-neutral-700">
                         {item.quantity}
                       </span>
                       <button
                         onClick={() => void changeQuantity(item, 1)}
-                        className="p-2 hover:bg-neutral-50"
+                        className="p-2 hover:bg-neutral-50 dark:hover:bg-neutral-800"
                       >
                         <Plus className="h-4 w-4" />
                       </button>
@@ -427,7 +427,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
                         )}{" "}
                         VND
                       </div>
-                      <div className="text-sm text-neutral-500">
+                      <div className="text-sm text-neutral-500 dark:text-neutral-400">
                         {item.product.price.toLocaleString("vi-VN")} VND / cái
                       </div>
                     </div>
@@ -437,7 +437,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
             ))}
           </div>
 
-          <aside className="h-fit bg-neutral-50 p-6 dark:bg-neutral-800">
+          <aside className="h-fit border border-neutral-200 bg-neutral-50 p-6 text-neutral-950 dark:border-neutral-800 dark:bg-neutral-800 dark:text-white">
             <h2 className="mb-6 text-xl font-light">Tổng đơn hàng</h2>
             <div className="mb-6 space-y-4 text-sm">
               <div className="flex justify-between">
@@ -459,7 +459,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
                 </div>
               )}
             </div>
-            <div className="mb-6 border-t border-neutral-200 pt-4">
+            <div className="mb-6 border-t border-neutral-200 pt-4 dark:border-neutral-700">
               <div className="flex items-center justify-between">
                 <span className="text-lg font-medium">Tổng cộng</span>
                 <span className="text-2xl font-light">
@@ -468,19 +468,19 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
               </div>
             </div>
             {error && (
-              <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
                 {error}
               </div>
             )}
             <button
               onClick={openCheckout}
-              className="mb-3 w-full bg-neutral-900 py-4 font-medium tracking-wide text-white hover:bg-neutral-800"
+              className="mb-3 w-full rounded-xl bg-neutral-900 py-4 font-medium tracking-wide text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
             >
               Thanh toán
             </button>
             <Link
               to="/shop"
-              className="inline-flex items-center gap-2 text-sm font-medium hover:underline"
+              className="inline-flex items-center gap-2 text-sm font-medium hover:underline dark:text-neutral-100"
             >
               Tiếp tục mua sắm
               <ArrowRight className="h-4 w-4" />
@@ -580,10 +580,10 @@ function CheckoutModal({
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
-      <div className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-lg bg-white p-5 shadow-xl">
+      <div className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-5 text-neutral-950 shadow-2xl dark:border-neutral-800 dark:bg-neutral-950 dark:text-white">
         <button
           onClick={onClose}
-          className="absolute right-3 top-3 rounded p-1 hover:bg-neutral-100"
+          className="absolute right-3 top-3 rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900 dark:hover:text-white"
         >
           <X className="h-5 w-5" />
         </button>
@@ -599,14 +599,14 @@ function CheckoutModal({
                     key={address.address_id}
                     type="button"
                     onClick={() => onSelectAddress(address.address_id)}
-                    className={`w-full rounded-lg border p-3 text-left text-sm ${selectedAddressId === address.address_id ? "border-neutral-950 bg-neutral-50" : "border-neutral-200"}`}
+                    className={`w-full rounded-xl border p-3 text-left text-sm transition-colors ${selectedAddressId === address.address_id ? "border-neutral-950 bg-neutral-50 text-neutral-950 dark:border-white dark:bg-neutral-900 dark:text-white" : "border-neutral-200 bg-white text-neutral-950 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900/40 dark:text-neutral-100 dark:hover:border-neutral-700"}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{address.full_name}</span>
-                      {address.is_default && <span className="text-xs text-neutral-500">Mặc định</span>}
+                      {address.is_default && <span className="text-xs text-neutral-500 dark:text-neutral-400">Mặc định</span>}
                     </div>
-                    <div className="mt-1 text-neutral-600">{address.phone}</div>
-                    <div className="mt-1 text-neutral-600">
+                    <div className="mt-1 text-neutral-600 dark:text-neutral-300">{address.phone}</div>
+                    <div className="mt-1 text-neutral-600 dark:text-neutral-300">
                       {address.address_line}, {address.ward}, {address.district}, {address.province}
                     </div>
                   </button>
@@ -618,7 +618,7 @@ function CheckoutModal({
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Tên người nhận</span>
                 <input
-                  className="w-full rounded border border-neutral-300 px-3 py-2"
+                  className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-950 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-950 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white dark:placeholder:text-neutral-500 dark:focus:border-white"
                   value={receiverName}
                   onChange={(event) => setReceiverName(event.target.value)}
                 />
@@ -626,7 +626,7 @@ function CheckoutModal({
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Số điện thoại</span>
                 <input
-                  className="w-full rounded border border-neutral-300 px-3 py-2"
+                  className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-neutral-950 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-950 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white dark:placeholder:text-neutral-500 dark:focus:border-white"
                   value={receiverPhone}
                   onChange={(event) => setReceiverPhone(event.target.value)}
                 />
@@ -637,7 +637,7 @@ function CheckoutModal({
               <div className="mb-2 text-sm font-medium">Mã giảm giá</div>
               <div className="flex gap-2">
                 <input
-                  className="min-w-0 flex-1 rounded border border-neutral-300 px-3 py-2 text-sm uppercase"
+                  className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm uppercase text-neutral-950 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-950 dark:border-neutral-700 dark:bg-neutral-900 dark:text-white dark:placeholder:text-neutral-500 dark:focus:border-white"
                   value={couponCode}
                   onChange={(event) => setCouponCode(event.target.value)}
                   placeholder="Nhập mã coupon"
@@ -645,48 +645,48 @@ function CheckoutModal({
                 <button
                   type="button"
                   onClick={onApplyCoupon}
-                  className="rounded border px-3 py-2 text-sm font-medium"
+                  className="rounded-lg border border-neutral-300 px-3 py-2 text-sm font-medium text-neutral-950 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:text-white dark:hover:bg-neutral-900"
                 >
                   Áp dụng
                 </button>
               </div>
               {couponMessage && (
-                <div className="mt-2 text-sm text-neutral-600">{couponMessage}</div>
+                <div className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">{couponMessage}</div>
               )}
             </div>
 
             <div className="mb-4 grid grid-cols-2 gap-3">
               <button
                 onClick={() => setPaymentMethod("cod")}
-                className={`rounded-lg border p-4 text-left ${paymentMethod === "cod" ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200"}`}
+                className={`rounded-xl border p-4 text-left transition-colors ${paymentMethod === "cod" ? "border-neutral-950 bg-neutral-950 text-white dark:border-white dark:bg-white dark:text-neutral-950" : "border-neutral-200 bg-white text-neutral-950 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white dark:hover:border-neutral-700"}`}
               >
                 <div className="font-medium">Tiền mặt</div>
                 <div className="text-xs opacity-75">COD</div>
               </button>
               <button
                 onClick={() => setPaymentMethod("bank_transfer")}
-                className={`rounded-lg border p-4 text-left ${paymentMethod === "bank_transfer" ? "border-neutral-950 bg-neutral-950 text-white" : "border-neutral-200"}`}
+                className={`rounded-xl border p-4 text-left transition-colors ${paymentMethod === "bank_transfer" ? "border-neutral-950 bg-neutral-950 text-white dark:border-white dark:bg-white dark:text-neutral-950" : "border-neutral-200 bg-white text-neutral-950 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white dark:hover:border-neutral-700"}`}
               >
                 <QrCode className="mb-1 h-5 w-5" />
                 <div className="font-medium">Chuyển khoản</div>
               </button>
             </div>
-            <div className="mb-4 flex justify-between rounded bg-neutral-50 p-3 text-sm">
+            <div className="mb-4 flex justify-between rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-950 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white">
               <span>Giảm giá</span>
               <strong>{discountAmount.toLocaleString("vi-VN")} VND</strong>
             </div>
-            <div className="mb-4 flex justify-between rounded bg-neutral-50 p-3 text-sm">
+            <div className="mb-4 flex justify-between rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-950 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white">
               <span>Tổng thanh toán</span>
               <strong>{amount.toLocaleString("vi-VN")} VND</strong>
             </div>
             {error && (
-              <div className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                 {error}
               </div>
             )}
             <button
               onClick={onSubmit}
-              className="w-full rounded bg-neutral-950 py-3 font-medium text-white"
+              className="w-full rounded-xl bg-neutral-950 py-3 font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
             >
               Thanh toán
             </button>
@@ -697,12 +697,12 @@ function CheckoutModal({
           <div className="text-center">
             <CheckCircle2 className="mx-auto mb-3 h-12 w-12 text-emerald-600" />
             <div className="text-lg font-semibold">Đã ghi nhận đơn hàng</div>
-            <p className="mt-2 text-sm text-neutral-600">
+            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
               Đơn #{paidOrder.orderId} sẽ được thanh toán tiền mặt khi nhận hàng.
             </p>
             <button
               onClick={onReturn}
-              className="mt-5 w-full rounded bg-neutral-950 py-3 font-medium text-white"
+              className="mt-5 w-full rounded-xl bg-neutral-950 py-3 font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
             >
               Xác nhận
             </button>
@@ -716,18 +716,18 @@ function CheckoutModal({
               alt="QR thanh toán"
               className="mx-auto h-60 w-60"
             />
-            <p className="mt-2 text-sm text-neutral-600">
+            <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
               Quét mã để mở trang thanh toán trên điện thoại.
             </p>
             <a
               href={gatewayUrl}
-              className="mt-3 block rounded border py-2 text-sm"
+              className="mt-3 block rounded-xl border border-neutral-300 py-2 text-sm text-neutral-950 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:text-white dark:hover:bg-neutral-900"
             >
               Mở trang thanh toán
             </a>
             <button
               onClick={onBankPaid}
-              className="mt-3 w-full rounded bg-neutral-950 py-3 font-medium text-white"
+              className="mt-3 w-full rounded-xl bg-neutral-950 py-3 font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
             >
               Tôi đã thanh toán
             </button>

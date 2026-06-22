@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { AlertCircle, Lock } from "lucide-react";
+
 import { useAdminAuth } from "../../context/AdminAuthContext";
 
 export function AdminLogin() {
@@ -29,9 +30,7 @@ export function AdminLogin() {
           : needsCustomer && !userId
             ? "/shop"
             : (next ?? roleTarget);
-      navigate(target, {
-        replace: true,
-      });
+      navigate(target, { replace: true });
     }
   }, [isLoggedIn, navigate, role, searchParams, userId]);
 
@@ -42,9 +41,7 @@ export function AdminLogin() {
 
     try {
       const success = await login(username, password);
-      if (success) {
-        // Redirect is centralized in the auth effect after API role is loaded.
-      } else {
+      if (!success) {
         setError("Tên đăng nhập hoặc mật khẩu không chính xác");
         setPassword("");
       }
@@ -54,31 +51,29 @@ export function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-neutral-900 to-neutral-800 flex items-center justify-center p-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-neutral-900 to-neutral-800 p-4">
       <div className="w-full max-w-md">
-        <div className="bg-white rounded-lg shadow-xl overflow-hidden">
-          {/* Header */}
-          <div className="bg-neutral-900 text-white px-6 py-8 text-center">
-            <div className="flex items-center justify-center gap-3 mb-2">
-              <Lock className="w-6 h-6" />
+        <div className="overflow-hidden rounded-lg bg-white shadow-xl">
+          <div className="bg-neutral-900 px-6 py-8 text-center text-white">
+            <div className="mb-2 flex items-center justify-center gap-3">
+              <Lock className="h-6 w-6" />
               <h1 className="text-2xl font-bold">Đăng nhập</h1>
             </div>
-            <p className="text-neutral-300 text-sm">
+            <p className="text-sm text-neutral-300">
               Dùng chung cho admin và người dùng
             </p>
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5 p-6">
             {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-                <span className="text-red-800 text-sm">{error}</span>
+              <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
+                <AlertCircle className="h-5 w-5 flex-shrink-0 text-red-600" />
+                <span className="text-sm text-red-800">{error}</span>
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-neutral-900 mb-2">
+              <label className="mb-2 block text-sm font-medium text-neutral-900">
                 Tên đăng nhập
               </label>
               <input
@@ -86,13 +81,13 @@ export function AdminLogin() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Nhập tên đăng nhập"
-                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all"
+                className="w-full rounded-lg border border-neutral-300 px-4 py-2 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 disabled={isLoading}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-neutral-900 mb-2">
+              <label className="mb-2 block text-sm font-medium text-neutral-900">
                 Mật khẩu
               </label>
               <input
@@ -100,7 +95,7 @@ export function AdminLogin() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Nhập mật khẩu"
-                className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-transparent transition-all"
+                className="w-full rounded-lg border border-neutral-300 px-4 py-2 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 disabled={isLoading}
               />
             </div>
@@ -108,14 +103,13 @@ export function AdminLogin() {
             <button
               type="submit"
               disabled={isLoading || !username || !password}
-              className="w-full py-3 bg-neutral-900 text-white font-medium rounded-lg hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full rounded-lg bg-neutral-900 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isLoading ? "Đang đăng nhập..." : "Đăng Nhập"}
+              {isLoading ? "Đang đăng nhập..." : "Đăng nhập"}
             </button>
           </form>
 
-          {/* Footer */}
-          <div className="bg-neutral-50 px-6 py-4 border-t border-neutral-200 text-center text-sm text-neutral-600 space-y-2">
+          <div className="space-y-2 border-t border-neutral-200 bg-neutral-50 px-6 py-4 text-center text-sm text-neutral-600">
             <p>
               Chưa có tài khoản?{" "}
               <Link
@@ -125,10 +119,14 @@ export function AdminLogin() {
                 Đăng ký
               </Link>
             </p>
-            <p><Link to="/forgot-password" className="font-medium text-neutral-900 underline">Quên mật khẩu?</Link></p>
-            <p>Demo credentials:</p>
-            <p className="font-mono text-neutral-900">Admin: admin / 123</p>
-            <p className="font-mono text-neutral-900">User: user / 123</p>
+            <p>
+              <Link
+                to="/forgot-password"
+                className="font-medium text-neutral-900 underline"
+              >
+                Quên mật khẩu?
+              </Link>
+            </p>
           </div>
         </div>
       </div>

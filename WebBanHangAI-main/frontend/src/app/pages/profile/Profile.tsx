@@ -227,7 +227,7 @@ export function Profile() {
   }
 
   async function loadLocalWishlistItems() {
-    const storedIds = readStoredWishlistIds();
+    const storedIds = readStoredWishlistIds(userId);
     const hydratedItems = await Promise.all(
       storedIds.map(async (productId) => {
         try {
@@ -243,7 +243,7 @@ export function Profile() {
 
   async function seedWishlistFromApi(apiWishlist: Array<{ product: Product }>) {
     const nextIds = apiWishlist.map((item) => String(item.product.id));
-    writeStoredWishlistIds(nextIds);
+    writeStoredWishlistIds(nextIds, userId);
     setWishlistItems(apiWishlist.map((item) => item.product));
     setSelectedWishlistIds([]);
   }
@@ -314,8 +314,7 @@ export function Profile() {
             color: item.color,
           })),
         );
-        const localWishlistIds = readStoredWishlistIds();
-        if (hasStoredWishlistIds()) {
+        if (hasStoredWishlistIds(activeUserId)) {
           await loadLocalWishlistItems();
         } else if (apiWishlist.length > 0) {
           await seedWishlistFromApi(apiWishlist);
@@ -375,7 +374,7 @@ export function Profile() {
   };
 
   const removeWishlistItem = (productId: string) => {
-    removeStoredWishlistId(productId);
+    removeStoredWishlistId(productId, userId);
     setWishlistItems((current) =>
       current.filter((item) => String(item.id) !== productId),
     );
@@ -386,7 +385,7 @@ export function Profile() {
 
   const removeSelectedWishlistItems = () => {
     selectedWishlistIds.forEach((productId) =>
-      removeStoredWishlistId(productId),
+      removeStoredWishlistId(productId, userId),
     );
     setWishlistItems((current) =>
       current.filter((item) => !selectedWishlistIds.includes(String(item.id))),

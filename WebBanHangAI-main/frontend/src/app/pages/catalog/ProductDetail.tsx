@@ -128,7 +128,7 @@ export function ProductDetail() {
           );
         }
       } catch {
-        if (isMounted) setIsLiked(readStoredWishlistIds().includes(String(id)));
+        if (isMounted) setIsLiked(readStoredWishlistIds(userId).includes(String(id)));
       }
     }
 
@@ -242,7 +242,7 @@ export function ProductDetail() {
     }
     if (isLiked) return;
     setIsLiked(true);
-    addStoredWishlistId(String(product.id));
+    addStoredWishlistId(String(product.id), userId);
     await addWishlistItem(userId, product.id).catch(() => undefined);
     window.dispatchEvent(new Event("wishlist:updated"));
   };
