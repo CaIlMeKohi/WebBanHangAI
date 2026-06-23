@@ -23,8 +23,11 @@ from products.business.views import (
     NotificationListAPIView,
     NotificationReadAPIView,
     PaymentMethodViewSet,
-    PaymentCallbackAPIView,
     PaymentCreateAPIView,
+    PaymentStatusAPIView,
+    PayOSWebhookAPIView,
+    ReorderAsCODAPIView,
+    SwitchPaymentToCODAPIView,
     ProductReviewsAPIView,
     RecommendationConfigViewSet,
     RecommendationEventAPIView,
@@ -92,7 +95,10 @@ product_review_patterns = [
 
 payment_patterns = [
     path('create', PaymentCreateAPIView.as_view()),
-    path('<str:provider>/callback', PaymentCallbackAPIView.as_view()),
+    path('payos/webhook', PayOSWebhookAPIView.as_view()),
+    path('<int:order_id>/status', PaymentStatusAPIView.as_view()),
+    path('<int:order_id>/switch-to-cod', SwitchPaymentToCODAPIView.as_view()),
+    path('<int:order_id>/reorder-cod', ReorderAsCODAPIView.as_view()),
 ]
 
 staff_patterns = [

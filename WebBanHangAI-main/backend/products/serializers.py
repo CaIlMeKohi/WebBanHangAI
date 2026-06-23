@@ -787,6 +787,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'payment_status',
             'payment_method',
             'cancel_request_status',
+            'payment_expires_at',
             'created_at',
             'updated_at',
             'items',

@@ -30,6 +30,7 @@ export interface ApiOrder {
   payment_status: string;
   payment_method: string;
   cancel_request_status?: "pending" | "approved" | "rejected" | null;
+  payment_expires_at?: string | null;
   created_at: string;
   items: Array<{
     order_item_id: number;

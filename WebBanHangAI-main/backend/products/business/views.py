@@ -37,8 +37,11 @@ from products.interfaces.api.return_views import (
     StaffReturnAPIView as CleanStaffReturnAPIView,
 )
 from products.interfaces.api.payment_views import (
-    PaymentCallbackAPIView as CleanPaymentCallbackAPIView,
+    PaymentStatusAPIView as CleanPaymentStatusAPIView,
     PaymentCreateAPIView as CleanPaymentCreateAPIView,
+    PayOSWebhookAPIView as CleanPayOSWebhookAPIView,
+    ReorderAsCODAPIView as CleanReorderAsCODAPIView,
+    SwitchPaymentToCODAPIView as CleanSwitchPaymentToCODAPIView,
 )
 from products.interfaces.api.report_views import (
     ReportsBestBrandsAPIView as CleanReportsBestBrandsAPIView,
@@ -589,5 +592,17 @@ class PaymentCreateAPIView(CleanPaymentCreateAPIView):
     """Compatibility wrapper for payment create route."""
 
 
-class PaymentCallbackAPIView(CleanPaymentCallbackAPIView):
-    """Compatibility wrapper for payment callback route."""
+class PayOSWebhookAPIView(CleanPayOSWebhookAPIView):
+    """Compatibility wrapper for the signed payOS webhook route."""
+
+
+class PaymentStatusAPIView(CleanPaymentStatusAPIView):
+    """Compatibility wrapper for customer payment status."""
+
+
+class SwitchPaymentToCODAPIView(CleanSwitchPaymentToCODAPIView):
+    """Compatibility wrapper for switching an unpaid payOS order to COD."""
+
+
+class ReorderAsCODAPIView(CleanReorderAsCODAPIView):
+    """Compatibility wrapper for recreating an expired order as COD."""

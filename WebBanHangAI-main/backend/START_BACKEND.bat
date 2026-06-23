@@ -90,6 +90,7 @@ popd
 
 echo [INFO] Khoi dong server tai http://localhost:8000 ...
 echo [INFO] Mo http://127.0.0.1:5173 de frontend tu cap nhat khi sua code.
+start "WEBBANHANG PAYOS EXPIRY" /min cmd /c "cd /d %CD% && venv\Scripts\python.exe manage.py expire_payos_orders --watch --interval 30"
 "%VENV_PY%" manage.py runserver
 goto :eof
 

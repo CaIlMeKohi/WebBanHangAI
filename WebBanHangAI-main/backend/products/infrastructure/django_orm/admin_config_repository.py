@@ -18,6 +18,7 @@ class DjangoOrmAdminConfigRepository:
         {'method_id': 2, 'code': 'vnpay', 'name': 'VNPay', 'is_active': True, 'config': {}, 'source': 'payments.method'},
         {'method_id': 3, 'code': 'momo', 'name': 'MoMo', 'is_active': True, 'config': {}, 'source': 'payments.method'},
         {'method_id': 4, 'code': 'bank_transfer', 'name': 'Chuyen khoan ngan hang', 'is_active': True, 'config': {}, 'source': 'payments.method'},
+        {'method_id': 5, 'code': 'payos', 'name': 'payOS', 'is_active': True, 'config': {}, 'source': 'payments.method'},
     ]
 
     def payment_methods_table_exists(self) -> bool:

@@ -19,13 +19,6 @@ class PaymentCallbackDTO:
     order_id: Any
     success: bool
     transaction_id: Any = None
+    amount: Any = None
+    payment_link_id: Any = None
     raw_payload: dict[str, Any] | None = None
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> 'PaymentCallbackDTO':
-        return cls(
-            order_id=payload.get('order_id'),
-            success=str(payload.get('success', 'false')).lower() in {'true', '1', 'success'},
-            transaction_id=payload.get('transaction_id'),
-            raw_payload=dict(payload),
-        )

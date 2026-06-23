@@ -62,3 +62,32 @@ backend\venv\Scripts\python.exe backend\manage.py test
 cd frontend
 npm run build
 ```
+
+## Cau hinh payOS
+
+Tao kenh thanh toan tai `https://my.payos.vn`, sau do them cac bien sau vao file `.env`:
+
+```dotenv
+PAYOS_CLIENT_ID=
+PAYOS_API_KEY=
+PAYOS_CHECKSUM_KEY=
+FRONTEND_PUBLIC_URL=http://127.0.0.1:5173
+PAYOS_RETURN_URL=http://127.0.0.1:5173/payment/result
+PAYOS_CANCEL_URL=http://127.0.0.1:5173/payment/result
+PAYOS_WEBHOOK_URL=
+PAYOS_PAYMENT_TIMEOUT_MINUTES=15
+```
+
+Khi chay local, trang ket qua se chu dong hoi API payOS va cap nhat don hang, nen khong bat buoc dung ngrok hay webhook.
+
+Webhook van duoc khuyen nghi khi deploy production de he thong cap nhat ngay ca khi khach dong trinh duyet. Khi da co URL HTTPS cong khai, dien `PAYOS_WEBHOOK_URL` va dang ky:
+
+```powershell
+backend\venv\Scripts\python.exe backend\manage.py configure_payos_webhook
+```
+
+Lenh khoi dong cua du an se chay kem bo kiem tra don payOS qua han moi 30 giay. Neu deploy bang cach khac, hay chay mot worker rieng:
+
+```powershell
+backend\venv\Scripts\python.exe backend\manage.py expire_payos_orders --watch --interval 30
+```

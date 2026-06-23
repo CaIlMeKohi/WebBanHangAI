@@ -86,7 +86,7 @@ class PaymentMethodSerializer(serializers.ModelSerializer):
 
     def validate_code(self, value):
         value = str(value or '').strip().lower()
-        allowed = {'cod', 'vnpay', 'momo', 'bank_transfer'}
+        allowed = {'cod', 'payos', 'vnpay', 'momo', 'bank_transfer'}
         if value not in allowed:
             raise serializers.ValidationError('Phuong thuc thanh toan khong hop le')
         return value

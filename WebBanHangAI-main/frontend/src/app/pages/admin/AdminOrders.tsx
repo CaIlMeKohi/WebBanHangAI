@@ -78,6 +78,7 @@ const paymentMethodLabels: Record<string, string> = {
   vnpay: "VNPay",
   momo: "MoMo",
   bank_transfer: "Chuyển khoản",
+  payos: "payOS",
 };
 
 const shipmentStatusLabels: Record<string, string> = {
@@ -189,6 +190,7 @@ export function AdminOrders() {
               <option value="vnpay">VNPay</option>
               <option value="momo">MoMo</option>
               <option value="bank_transfer">Chuyển khoản</option>
+              <option value="payos">payOS</option>
             </select>
             <input className="rounded border px-3 py-2" type="date" value={filters.from_date} onChange={(event) => setFilters({ ...filters, from_date: event.target.value })} />
             <input className="rounded border px-3 py-2" type="date" value={filters.to_date} onChange={(event) => setFilters({ ...filters, to_date: event.target.value })} />

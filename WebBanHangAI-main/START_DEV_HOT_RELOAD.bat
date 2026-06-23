@@ -26,6 +26,7 @@ if not exist "frontend\node_modules" (
 
 echo [INFO] Khoi dong backend Django runserver...
 start "WEBBANHANG BACKEND DEV" /min cmd /c "cd /d %CD%\backend && venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000"
+start "WEBBANHANG PAYOS EXPIRY" /min cmd /c "cd /d %CD%\backend && venv\Scripts\python.exe manage.py expire_payos_orders --watch --interval 30"
 
 echo [INFO] Khoi dong frontend Vite dev server...
 start "WEBBANHANG FRONTEND HOT RELOAD" cmd /c "cd /d %CD%\frontend && npm run dev"

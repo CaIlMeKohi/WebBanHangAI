@@ -502,6 +502,7 @@ function StaffPortalContent() {
               <option value="vnpay">VNPay</option>
               <option value="momo">MoMo</option>
               <option value="bank_transfer">Chuyển khoản</option>
+              <option value="payos">payOS</option>
             </select>
             <input className="rounded-xl border border-neutral-200 bg-white p-3 text-sm outline-none focus:border-neutral-950" type="date" value={filters.from_date} onChange={(event) => setFilters({ ...filters, from_date: event.target.value })} />
             <input className="rounded-xl border border-neutral-200 bg-white p-3 text-sm outline-none focus:border-neutral-950" type="date" value={filters.to_date} onChange={(event) => setFilters({ ...filters, to_date: event.target.value })} />

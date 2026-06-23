@@ -26,6 +26,7 @@ import {
   fetchProfile,
   fetchWishlist,
   requestPasswordReset,
+  reorderAsCOD,
   resetPassword,
   updateAddress,
   updateProfile,
@@ -421,6 +422,24 @@ export function Profile() {
       window.setTimeout(() => setRepurchaseNotice(""), 2500);
     } catch (error) {
       setOrderMessage(error instanceof Error ? error.message : "Không thể thêm lại sản phẩm vào giỏ hàng.");
+    } finally {
+      setRepurchasingOrderId(null);
+    }
+  }
+
+  async function reorderExpiredOrderAsCOD(order: MockOrder) {
+    if (repurchasingOrderId !== null) return;
+    setRepurchasingOrderId(order.orderId);
+    setOrderMessage("");
+    try {
+      const created = await reorderAsCOD(order.orderId);
+      window.location.assign(`/profile?tab=orders&orderId=${created.order_id}`);
+    } catch (error) {
+      setOrderMessage(
+        error instanceof Error
+          ? error.message
+          : "Không thể đặt lại. Tồn kho, giá hoặc coupon có thể đã thay đổi.",
+      );
     } finally {
       setRepurchasingOrderId(null);
     }
@@ -986,6 +1005,26 @@ export function Profile() {
                               <span className="flex-1 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
                                 Đang chờ duyệt hủy
                               </span>
+                            )}
+                            {order.statusRaw === "pending" &&
+                              order.paymentMethod === "payos" &&
+                              order.paymentStatus === "pending" && (
+                                <Link
+                                  to={`/payment/result?orderCode=${order.orderId}`}
+                                  className="flex-1 rounded bg-sky-600 py-2 text-center text-sm font-medium text-white hover:bg-sky-700"
+                                >
+                                  Thanh toán / đổi COD
+                                </Link>
+                              )}
+                            {order.statusRaw === "cancelled" && order.paymentMethod === "payos" && (
+                              <button
+                                type="button"
+                                onClick={() => void reorderExpiredOrderAsCOD(order)}
+                                disabled={repurchasingOrderId !== null}
+                                className="flex-1 rounded bg-neutral-900 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+                              >
+                                {repurchasingOrderId === order.orderId ? "Đang kiểm tra..." : "Đặt lại bằng COD"}
+                              </button>
                             )}
                             {order.statusRaw === "completed" && (
                               <button

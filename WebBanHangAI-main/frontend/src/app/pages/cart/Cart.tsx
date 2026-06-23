@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import {
+  createPayOSPayment,
   createOrder,
   deleteCartItem,
   applyCouponToCart,
@@ -31,7 +32,7 @@ import {
 } from "../../lib/cartStorage";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 
-type PaymentMethod = "cod" | "bank_transfer";
+type PaymentMethod = "cod" | "payos";
 
 export function Cart({ embedded = false }: { embedded?: boolean }) {
   const { isAuthReady, userId } = useAdminAuth();
@@ -50,6 +51,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
   const [discountAmount, setDiscountAmount] = useState(0);
   const [couponMessage, setCouponMessage] = useState("");
   const [availableCoupons, setAvailableCoupons] = useState<ApiCartCouponOption[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [paidOrder, setPaidOrder] = useState<{
     orderId: number;
     amount: number;
@@ -300,6 +302,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
       setError("Vui lòng nhập tên và số điện thoại người nhận.");
       return;
     }
+    setIsSubmitting(true);
     try {
       const ids = [...selectedIds];
       const order = await createOrder(userId, paymentMethod, ids, {
@@ -310,17 +313,47 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
       });
       setPaidOrder({ orderId: order.order_id, amount: order.final_amount });
       if (paymentMethod === "cod") {
-        setItems((current) =>
-          current.filter((item) => !ids.includes(item.cart_item_id)),
-        );
-        setSelectedIds([]);
-        removeLocalItemsById(ids);
-        window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+        removeCheckedOutItems(ids);
+      } else {
+        await openPayOSCheckout(order.order_id, ids);
       }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Không thể thanh toán đơn hàng.",
       );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function removeCheckedOutItems(ids: number[]) {
+    setItems((current) =>
+      current.filter((item) => !ids.includes(item.cart_item_id)),
+    );
+    setSelectedIds([]);
+    removeLocalItemsById(ids);
+    window.dispatchEvent(new Event(CART_UPDATED_EVENT));
+  }
+
+  async function openPayOSCheckout(orderId: number, ids: number[]) {
+    const payment = await createPayOSPayment(orderId);
+    removeCheckedOutItems(ids);
+    window.location.assign(payment.checkout_url);
+  }
+
+  async function continuePayOSPayment() {
+    if (!paidOrder) return;
+    setError("");
+    setIsSubmitting(true);
+    try {
+      const ids = [...selectedIds];
+      await openPayOSCheckout(paidOrder.orderId, ids);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Không thể mở payOS.",
+      );
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -532,6 +565,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
           discountAmount={discountAmount}
           couponMessage={couponMessage}
           availableCoupons={availableCoupons}
+          isSubmitting={isSubmitting}
           setPaymentMethod={setPaymentMethod}
           setReceiverName={setReceiverName}
           setReceiverPhone={setReceiverPhone}
@@ -545,6 +579,7 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
             setPaidOrder(null);
             navigate("/profile?tab=orders");
           }}
+          onPayOSContinue={() => void continuePayOSPayment()}
         />
       )}
     </div>
@@ -564,6 +599,7 @@ function CheckoutModal({
   discountAmount,
   couponMessage,
   availableCoupons,
+  isSubmitting,
   setPaymentMethod,
   setReceiverName,
   setReceiverPhone,
@@ -573,6 +609,7 @@ function CheckoutModal({
   onClose,
   onSubmit,
   onReturn,
+  onPayOSContinue,
 }: {
   amount: number;
   error: string;
@@ -586,6 +623,7 @@ function CheckoutModal({
   discountAmount: number;
   couponMessage: string;
   availableCoupons: ApiCartCouponOption[];
+  isSubmitting: boolean;
   setPaymentMethod: (method: PaymentMethod) => void;
   setReceiverName: (value: string) => void;
   setReceiverPhone: (value: string) => void;
@@ -595,18 +633,8 @@ function CheckoutModal({
   onClose: () => void;
   onSubmit: () => void;
   onReturn: () => void;
+  onPayOSContinue: () => void;
 }) {
-  const returnTo =
-    typeof window !== "undefined"
-      ? `${window.location.pathname}${window.location.search}`
-      : "/cart";
-  const gatewayUrl = paidOrder
-    ? `${window.location.origin}/payment-gateway?orderId=${paidOrder.orderId}&amount=${paidOrder.amount}&returnTo=${encodeURIComponent(returnTo)}`
-    : "";
-  const qrUrl = gatewayUrl
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(gatewayUrl)}`
-    : "";
-
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
       <div className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-5 text-neutral-950 shadow-2xl dark:border-neutral-800 dark:bg-neutral-950 dark:text-white">
@@ -715,11 +743,11 @@ function CheckoutModal({
                 <div className="text-xs opacity-75">COD</div>
               </button>
               <button
-                onClick={() => setPaymentMethod("bank_transfer")}
-                className={`rounded-xl border p-4 text-left transition-colors ${paymentMethod === "bank_transfer" ? "border-neutral-950 bg-neutral-950 text-white dark:border-white dark:bg-white dark:text-neutral-950" : "border-neutral-200 bg-white text-neutral-950 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white dark:hover:border-neutral-700"}`}
+                onClick={() => setPaymentMethod("payos")}
+                className={`rounded-xl border p-4 text-left transition-colors ${paymentMethod === "payos" ? "border-neutral-950 bg-neutral-950 text-white dark:border-white dark:bg-white dark:text-neutral-950" : "border-neutral-200 bg-white text-neutral-950 hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white dark:hover:border-neutral-700"}`}
               >
                 <QrCode className="mb-1 h-5 w-5" />
-                <div className="font-medium">Chuyển khoản</div>
+                <div className="font-medium">payOS / VietQR</div>
               </button>
             </div>
             <div className="mb-4 flex justify-between rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-950 dark:border-neutral-800 dark:bg-neutral-900 dark:text-white">
@@ -737,9 +765,10 @@ function CheckoutModal({
             )}
             <button
               onClick={onSubmit}
-              className="w-full rounded-xl bg-neutral-950 py-3 font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
+              disabled={isSubmitting}
+              className="w-full rounded-xl bg-neutral-950 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
             >
-              Thanh toán
+              {isSubmitting ? "Đang xử lý..." : "Thanh toán"}
             </button>
           </>
         )}
@@ -760,22 +789,25 @@ function CheckoutModal({
           </div>
         )}
 
-        {paidOrder && paymentMethod === "bank_transfer" && (
+        {paidOrder && paymentMethod === "payos" && (
           <div className="text-center">
-            <img
-              src={qrUrl}
-              alt="QR thanh toán"
-              className="mx-auto h-60 w-60"
-            />
+            <QrCode className="mx-auto mb-3 h-12 w-12 text-sky-600" />
+            <div className="text-lg font-semibold">Đơn hàng đã được tạo</div>
             <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
-              Quét mã để mở trang thanh toán trên điện thoại.
+              Tiếp tục đến cổng payOS để thanh toán đơn #{paidOrder.orderId}.
             </p>
-            <a
-              href={gatewayUrl}
-              className="mt-3 block rounded-xl border border-neutral-300 py-2 text-sm text-neutral-950 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:text-white dark:hover:bg-neutral-900"
+            {error && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+                {error}
+              </div>
+            )}
+            <button
+              onClick={onPayOSContinue}
+              disabled={isSubmitting}
+              className="mt-5 w-full rounded-xl bg-neutral-950 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
             >
-              Mở trang thanh toán
-            </a>
+              {isSubmitting ? "Đang mở payOS..." : "Tiếp tục thanh toán với payOS"}
+            </button>
           </div>
         )}
       </div>

@@ -20,8 +20,7 @@ import { AdminAccounts } from "./pages/admin/AdminAccounts";
 import { AdminCoupons } from "./pages/admin/AdminCoupons";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminOrders } from "./pages/admin/AdminOrders";
-import { PaymentQr } from "./pages/payment/PaymentQr";
-import { MockPaymentGateway } from "./pages/payment/MockPaymentGateway";
+import { PaymentResult } from "./pages/payment/PaymentResult";
 import { RouteError } from "./pages/RouteError";
 import { ComingSoon } from "./pages/ComingSoon";
 
@@ -56,8 +55,8 @@ export const router = createBrowserRouter([
         Component: Recommendations,
       },
       {
-        path: "payment/qr",
-        Component: PaymentQr,
+        path: "payment/result",
+        Component: PaymentResult,
       },
       {
         path: "dang-hoan-thien",
@@ -93,10 +92,6 @@ export const router = createBrowserRouter([
   {
     path: "/wishlist",
     Component: RedirectToWishlist,
-  },
-  {
-    path: "/payment-gateway",
-    Component: MockPaymentGateway,
   },
   {
     path: "/portal-admin",
