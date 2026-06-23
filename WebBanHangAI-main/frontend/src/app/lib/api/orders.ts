@@ -10,6 +10,10 @@ export interface ApiOrder {
     phone?: string;
     customer_code?: string;
   };
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  customer_code?: string;
   shipping_address?: {
     receiver_name?: string;
     receiver_phone?: string;
@@ -25,6 +29,7 @@ export interface ApiOrder {
   status: string;
   payment_status: string;
   payment_method: string;
+  cancel_request_status?: "pending" | "approved" | "rejected" | null;
   created_at: string;
   items: Array<{
     order_item_id: number;

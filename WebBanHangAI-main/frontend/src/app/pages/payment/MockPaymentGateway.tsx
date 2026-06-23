@@ -13,7 +13,8 @@ export function MockPaymentGateway() {
   async function confirm() {
     if (!orderId) return;
     await confirmMockPayment(orderId);
-    navigate(`${returnTo}?payment=success&orderId=${orderId}`, {
+    const separator = returnTo.includes("?") ? "&" : "?";
+    navigate(`${returnTo}${separator}payment=success&orderId=${orderId}`, {
       replace: true,
     });
   }

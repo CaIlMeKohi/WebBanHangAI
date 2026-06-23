@@ -26,6 +26,10 @@ type StaffOrder = {
     phone?: string;
     customer_code?: string;
   };
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  customer_code?: string;
   shipping_address?: {
     receiver_name?: string;
     receiver_phone?: string;
@@ -51,6 +55,16 @@ type StaffOrder = {
     price: number | string;
     subtotal?: number | string;
   }>;
+};
+
+type StaffRequest = {
+  return_id: number;
+  order: number;
+  reason: string;
+  desired_solution: string;
+  status: "pending" | "approved" | "rejected" | "completed";
+  reject_reason?: string;
+  created_at: string;
 };
 
 type StockAction = "import" | "adjust";
@@ -171,6 +185,9 @@ function StaffPortalContent() {
   const { logout } = useAdminAuth();
   const [activePortalTab, setActivePortalTab] = useState<"orders" | "products">("orders");
   const [orders, setOrders] = useState<StaffOrder[]>([]);
+  const [staffRequests, setStaffRequests] = useState<StaffRequest[]>([]);
+  const [rejectingRequestId, setRejectingRequestId] = useState<number | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [stockVariants, setStockVariants] = useState<StockVariantOption[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<StaffOrder | null>(null);
@@ -200,14 +217,16 @@ function StaffPortalContent() {
   async function load() {
     const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
     try {
-      const [nextOrders, nextLowStock, nextStockVariants] = await Promise.all([
+      const [nextOrders, nextLowStock, nextStockVariants, nextRequests] = await Promise.all([
         api<StaffOrder[]>(`${STAFF_API_BASE}/staff/orders?${params.toString()}`),
         api<any[]>(`${STAFF_API_BASE}/staff/inventory/low-stock`),
         api<StockVariantOption[]>(`${STAFF_API_BASE}/staff/inventory/variants`),
+        api<StaffRequest[]>(`${STAFF_API_BASE}/staff/returns`),
       ]);
       setOrders(nextOrders);
       setLowStock(nextLowStock);
       setStockVariants(nextStockVariants);
+      setStaffRequests(nextRequests);
       setSelectedOrder((current) => nextOrders.find((order) => order.order_id === current?.order_id) ?? current);
     } catch (error) {
       if (error instanceof Error && error.message.includes("Token")) {
@@ -264,6 +283,26 @@ function StaffPortalContent() {
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật đơn hàng");
+    }
+  }
+
+  async function reviewStaffRequest(requestId: number, status: "approved" | "rejected") {
+    const reason = status === "rejected" ? rejectionReason.trim() : "";
+    if (status === "rejected" && !reason) {
+      setMessage("Vui lòng nhập lý do từ chối yêu cầu hủy đơn.");
+      return;
+    }
+    try {
+      await api(`${STAFF_API_BASE}/staff/returns/${requestId}/status`, {
+        method: "PUT",
+        body: JSON.stringify({ status, reason }),
+      });
+      setRejectingRequestId(null);
+      setRejectionReason("");
+      setMessage(status === "approved" ? "Đã duyệt hủy đơn hàng." : "Đã từ chối yêu cầu hủy đơn.");
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Không thể xử lý yêu cầu hủy đơn.");
     }
   }
 
@@ -504,10 +543,54 @@ function StaffPortalContent() {
         {selectedOrder && <OrderDetailPanel order={selectedOrder} onClose={() => setSelectedOrder(null)} />}
 
         <section className="grid gap-4">
-          <Panel title="Đổi trả / khiếu nại">
-            <div className="rounded-2xl border border-dashed border-neutral-200 bg-white p-4 text-sm text-neutral-500">
-              Tính năng này đang được hoàn thiện.
-            </div>
+          <Panel title="Đổi trả / khiếu nại / hủy đơn">
+            {staffRequests.filter((item) => item.desired_solution === "cancel_order").length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-neutral-200 bg-white p-4 text-sm text-neutral-500">
+                Chưa có yêu cầu hủy đơn từ khách hàng.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {staffRequests.filter((item) => item.desired_solution === "cancel_order").map((item) => (
+                  <div key={item.return_id} className="rounded-xl border border-neutral-200 p-4 text-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold">Yêu cầu hủy đơn #{item.order}</div>
+                        <div className="mt-1 text-neutral-600">Lý do: {item.reason}</div>
+                        <div className="mt-1 text-xs text-neutral-500">Gửi lúc {new Date(item.created_at).toLocaleString("vi-VN")}</div>
+                      </div>
+                      <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium">
+                        {item.status === "pending" ? "Chờ duyệt" : item.status === "approved" ? "Đã duyệt" : "Đã từ chối"}
+                      </span>
+                    </div>
+                    {item.status === "pending" && (
+                      <div className="mt-4 space-y-3">
+                        {rejectingRequestId === item.return_id && (
+                          <textarea
+                            className="min-h-20 w-full rounded-lg border border-neutral-200 p-3 outline-none focus:border-neutral-950"
+                            value={rejectionReason}
+                            onChange={(event) => setRejectionReason(event.target.value)}
+                            placeholder="Nhập lý do từ chối"
+                          />
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" onClick={() => void reviewStaffRequest(item.return_id, "approved")} className="rounded-lg bg-neutral-950 px-4 py-2 font-medium text-white">
+                            Duyệt hủy đơn
+                          </button>
+                          {rejectingRequestId === item.return_id ? (
+                            <>
+                              <button type="button" onClick={() => void reviewStaffRequest(item.return_id, "rejected")} className="rounded-lg border border-red-300 px-4 py-2 font-medium text-red-700">Xác nhận từ chối</button>
+                              <button type="button" onClick={() => { setRejectingRequestId(null); setRejectionReason(""); }} className="rounded-lg border px-4 py-2">Đóng</button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => setRejectingRequestId(item.return_id)} className="rounded-lg border border-red-300 px-4 py-2 font-medium text-red-700">Từ chối</button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </Panel>
         </section>
         </>}
@@ -1037,7 +1120,12 @@ function ReadOnlyMetric({ label, value }: { label: string; value: string | numbe
 }
 
 function OrderDetailPanel({ order, onClose }: { order: StaffOrder; onClose: () => void }) {
-  const customer = order.customer ?? {};
+  const customer = {
+    full_name: order.customer?.full_name || order.customer_name,
+    email: order.customer?.email || order.customer_email,
+    phone: order.customer?.phone || order.customer_phone,
+    customer_code: order.customer?.customer_code || order.customer_code,
+  };
   const address = order.shipping_address ?? {};
 
   return (

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { History } from "lucide-react";
 
 import { AdminAuditHistoryModal } from "../../components/admin/AdminAuditHistoryModal";
-import { fetchAdminAuditLogs, fetchAdminOrders, type AdminProductHistoryItem, type ApiOrder } from "../../lib/api";
+import { fetchAdminAuditLogs, fetchAdminOrderDetail, fetchAdminOrders, type AdminProductHistoryItem, type ApiOrder } from "../../lib/api";
 
 type OrderFilters = {
   status: string;
@@ -102,6 +102,7 @@ export function AdminOrders() {
   const [filters, setFilters] = useState<OrderFilters>({ status: "", payment_method: "", from_date: "", to_date: "" });
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [historyItems, setHistoryItems] = useState<AdminProductHistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
@@ -132,6 +133,18 @@ export function AdminOrders() {
       setError(err instanceof Error ? err.message : "Không tải được lịch sử chỉnh sửa");
     } finally {
       setIsHistoryLoading(false);
+    }
+  }
+
+  async function openOrderDetail(order: AdminOrder) {
+    setIsDetailLoading(true);
+    setError("");
+    try {
+      setSelectedOrder((await fetchAdminOrderDetail(order.order_id)) as AdminOrder);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không tải được chi tiết đơn hàng");
+    } finally {
+      setIsDetailLoading(false);
     }
   }
 
@@ -196,7 +209,7 @@ export function AdminOrders() {
                 "final_amount",
                 "created_at",
               ]}
-              onSelect={setSelectedOrder}
+              onSelect={(order) => void openOrderDetail(order)}
             />
           )}
         </Panel>
@@ -204,6 +217,11 @@ export function AdminOrders() {
 
       {selectedOrder && (
         <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+      )}
+      {isDetailLoading && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/20 text-sm font-medium text-white">
+          Đang tải chi tiết đơn hàng...
+        </div>
       )}
       {isHistoryOpen && (
         <AdminAuditHistoryModal
@@ -276,7 +294,12 @@ function DataTable<T extends object>({
 
 function OrderDetailModal({ order, onClose }: { order: AdminOrder; onClose: () => void }) {
   const address = order.shipping_address;
-  const customer = order.customer;
+  const customer = {
+    full_name: order.customer?.full_name || order.customer_name,
+    email: order.customer?.email || order.customer_email,
+    phone: order.customer?.phone || order.customer_phone,
+    customer_code: order.customer?.customer_code || order.customer_code,
+  };
   const shipment = order.shipment;
   const items = (order.items ?? []) as AdminOrderItem[];
 

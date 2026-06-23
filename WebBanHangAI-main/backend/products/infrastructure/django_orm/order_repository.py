@@ -8,7 +8,7 @@ from products.domain.common.exceptions import BusinessRuleViolation, NotFoundErr
 from products.infrastructure.django_orm.coupon_repository import _calculate_discount
 from products.infrastructure.stored_procedures import cancel_order_and_restore_stock, check_variant_stock, decrease_variant_stock, update_order_status
 from products.models import Order
-from products.models import Address, AuditLog, CartItem, Coupon, CouponUsage, Notification, OrderItem, OrderStatusHistory, Payment, RecommendationLog, Shipment, StaffProfile, UserInteraction
+from products.models import Address, AuditLog, CartItem, Coupon, CouponUsage, Notification, OrderItem, OrderStatusHistory, Payment, RecommendationLog, ReturnRequest, Shipment, StaffProfile, UserInteraction
 from products.services.email_service import send_order_confirmation
 
 
@@ -58,6 +58,7 @@ class DjangoOrmOrderRepository:
                 'completed',
                 'cancelled',
             ])
+            .select_related('user', 'user__user', 'address')
             .prefetch_related('items', 'items__reviews', 'items__product')
             .order_by('-created_at')
         )
@@ -74,6 +75,7 @@ class DjangoOrmOrderRepository:
     def get_admin_order_detail(self, order_id: int):
         return (
             Order.objects.filter(order_id=order_id)
+            .select_related('user', 'user__user', 'address')
             .prefetch_related('items', 'items__reviews', 'items__product', 'status_histories')
             .first()
         )
@@ -164,11 +166,31 @@ class DjangoOrmOrderRepository:
             raise NotFoundError('Order not found')
         if order.status not in {'pending', 'confirmed', 'processing'}:
             raise BusinessRuleViolation('Khong the huy don o trang thai hien tai')
-        try:
-            cancel_order_and_restore_stock(order.order_id, user.user_id if user else None, payload.reason)
-        except DatabaseError as exc:
-            raise BusinessRuleViolation('Khong the huy don va hoan kho') from exc
-        order.refresh_from_db()
+        if ReturnRequest.objects.filter(
+            order=order,
+            desired_solution='cancel_order',
+            status='pending',
+        ).exists():
+            raise BusinessRuleViolation('Yeu cau huy don dang cho nhan vien duyet')
+        request_item = ReturnRequest.objects.create(
+            user=customer,
+            order=order,
+            reason=payload.reason,
+            desired_solution='cancel_order',
+        )
+        Notification.objects.create(
+            user=user,
+            title='Da gui yeu cau huy don',
+            content=f'Yeu cau huy don #{order.order_id} dang cho nhan vien duyet.',
+            notification_type='order_cancel',
+        )
+        AuditLog.objects.create(
+            actor=user,
+            action='request_order_cancellation',
+            entity_type='order',
+            entity_id=str(order.order_id),
+            metadata={'return_request_id': request_item.return_id, 'reason': payload.reason},
+        )
         return order
 
     def confirm_customer_order_received(self, user, customer, order_id: int):

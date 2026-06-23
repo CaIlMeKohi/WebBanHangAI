@@ -3,7 +3,7 @@ from unittest.mock import patch
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from products.models import CartItem, CouponUsage, Order, Payment
+from products.models import CartItem, CouponUsage, Order, Payment, ReturnRequest
 from products.tests.factories import (
     auth_headers,
     create_address,
@@ -62,23 +62,24 @@ class OrderApiTests(APITestCase):
         self.assertEqual(response.data["discount_amount"], "10000.00")
         self.assertTrue(CouponUsage.objects.filter(coupon=coupon, user=self.customer).exists())
 
-    def test_customer_cancel_pending_order(self):
+    def test_customer_cancel_pending_order_creates_approval_request(self):
         order = create_order(customer=self.customer, address=self.address, status="pending")
 
-        def cancel_sp(order_id, actor_user_id=None, reason="", restore_stock=False):
-            Order.objects.filter(order_id=order_id).update(status="cancelled")
-            return []
-
-        with patch("products.infrastructure.django_orm.order_repository.cancel_order_and_restore_stock", side_effect=cancel_sp):
-            response = self.client.post(
-                f"/api/products/orders/{order.order_id}/cancel/",
-                {"user_id": self.user.user_id, "reason": "Changed mind"},
-                format="json",
-                **auth_headers(self.user),
-            )
+        response = self.client.post(
+            f"/api/products/orders/{order.order_id}/cancel/",
+            {"user_id": self.user.user_id, "reason": "Changed mind"},
+            format="json",
+            **auth_headers(self.user),
+        )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["status"], "cancelled")
+        self.assertEqual(response.data["status"], "pending")
+        self.assertEqual(response.data["cancel_request_status"], "pending")
+        self.assertTrue(ReturnRequest.objects.filter(
+            order=order,
+            desired_solution="cancel_order",
+            status="pending",
+        ).exists())
 
     def test_customer_cancel_delivered_order_is_blocked(self):
         order = create_order(customer=self.customer, address=self.address, status="delivered")

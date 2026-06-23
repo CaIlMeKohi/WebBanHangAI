@@ -1,7 +1,7 @@
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from products.models import PaymentWebhookLog
+from products.models import Notification, PaymentWebhookLog
 from products.tests.factories import create_customer_user, create_order, create_payment
 
 
@@ -23,6 +23,11 @@ class PaymentCallbackApiTests(APITestCase):
         self.assertEqual(payment.status, "success")
         self.assertEqual(order.payment_status, "paid")
         self.assertTrue(PaymentWebhookLog.objects.filter(payment=payment, processed=True).exists())
+        self.assertTrue(Notification.objects.filter(
+            user=customer.user,
+            notification_type="payment",
+            title="Thanh toán thành công",
+        ).exists())
 
     def test_payment_callback_repeated_does_not_crash(self):
         _user, customer = create_customer_user()
@@ -43,3 +48,7 @@ class PaymentCallbackApiTests(APITestCase):
         self.assertEqual(first.status_code, status.HTTP_200_OK)
         self.assertEqual(second.status_code, status.HTTP_200_OK)
         self.assertEqual(PaymentWebhookLog.objects.filter(payment__order=order).count(), 2)
+        self.assertEqual(Notification.objects.filter(
+            user=customer.user,
+            notification_type="payment",
+        ).count(), 1)

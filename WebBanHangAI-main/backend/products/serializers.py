@@ -715,26 +715,58 @@ class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     customer = serializers.SerializerMethodField()
     shipping_address = serializers.SerializerMethodField()
+    cancel_request_status = serializers.SerializerMethodField()
+    customer_name = serializers.SerializerMethodField()
+    customer_email = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    customer_code = serializers.SerializerMethodField()
+
+    def get_cancel_request_status(self, obj: Order):
+        request_item = obj.return_requests.filter(desired_solution='cancel_order').order_by('-created_at').first()
+        return request_item.status if request_item else None
 
     def get_customer(self, obj: Order) -> dict:
         customer = obj.user
         user = customer.user if customer else None
+        address = obj.address
         return {
             'customer_id': customer.customer_id if customer else None,
-            'full_name': customer.full_name if customer else '',
+            'full_name': (
+                (customer.full_name if customer else '')
+                or obj.receiver_name_snapshot
+                or (address.full_name if address else '')
+                or (user.email if user else '')
+            ),
             'email': user.email if user else '',
-            'phone': user.phone if user else '',
+            'phone': (
+                (user.phone if user else '')
+                or obj.receiver_phone_snapshot
+                or (address.phone if address else '')
+            ),
             'customer_code': customer.customer_code if customer else '',
         }
 
+    def get_customer_name(self, obj: Order) -> str:
+        return self.get_customer(obj)['full_name']
+
+    def get_customer_email(self, obj: Order) -> str:
+        return self.get_customer(obj)['email']
+
+    def get_customer_phone(self, obj: Order) -> str:
+        return self.get_customer(obj)['phone']
+
+    def get_customer_code(self, obj: Order) -> str:
+        return self.get_customer(obj)['customer_code']
+
     def get_shipping_address(self, obj: Order) -> dict:
+        address = obj.address
         return {
-            'receiver_name': obj.receiver_name_snapshot,
-            'receiver_phone': obj.receiver_phone_snapshot,
-            'address_line': obj.address_line_snapshot,
-            'ward': obj.ward_snapshot,
-            'district': obj.district_snapshot,
-            'province': obj.province_snapshot,
+            'receiver_name': obj.receiver_name_snapshot or (address.full_name if address else ''),
+            'receiver_phone': obj.receiver_phone_snapshot or (address.phone if address else ''),
+            'address_line': obj.address_line_snapshot or (address.address_line if address else ''),
+            'ward': obj.ward_snapshot or (address.ward if address else ''),
+            'district': obj.district_snapshot or (address.district if address else ''),
+            'province': obj.province_snapshot or (address.province if address else ''),
         }
 
     class Meta:
@@ -742,6 +774,10 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = [
             'order_id',
             'customer',
+            'customer_name',
+            'customer_email',
+            'customer_phone',
+            'customer_code',
             'shipping_address',
             'total_amount',
             'shipping_fee',
@@ -750,6 +786,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'status',
             'payment_status',
             'payment_method',
+            'cancel_request_status',
             'created_at',
             'updated_at',
             'items',

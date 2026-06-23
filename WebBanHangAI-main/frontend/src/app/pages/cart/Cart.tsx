@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import {
   ArrowRight,
   CheckCircle2,
@@ -36,6 +36,7 @@ type PaymentMethod = "cod" | "bank_transfer";
 export function Cart({ embedded = false }: { embedded?: boolean }) {
   const { isAuthReady, userId } = useAdminAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<ApiCartItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [error, setError] = useState("");
@@ -53,6 +54,18 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
     orderId: number;
     amount: number;
   } | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState("");
+
+  useEffect(() => {
+    if (searchParams.get("payment") !== "success") return;
+    setPaymentNotice("Thanh toán thành công");
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("payment");
+    nextParams.delete("orderId");
+    setSearchParams(nextParams, { replace: true });
+    const timer = window.setTimeout(() => setPaymentNotice(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [searchParams, setSearchParams]);
 
   async function loadLocalCartItems() {
     const storedItems = readStoredCart();
@@ -336,6 +349,11 @@ export function Cart({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? "" : "min-h-screen"} bg-white dark:bg-neutral-900`}>
+      {paymentNotice && (
+        <div className="fixed left-1/2 top-24 z-[70] -translate-x-1/2 rounded-lg bg-emerald-600 px-5 py-3 font-medium text-white shadow-lg">
+          {paymentNotice}
+        </div>
+      )}
       <div className={embedded ? "w-full" : "mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8"}>
         {!embedded && <h1 className="mb-6 text-3xl font-light tracking-wide">Giỏ hàng</h1>}
 

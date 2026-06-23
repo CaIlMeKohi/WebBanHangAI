@@ -90,6 +90,10 @@ export async function fetchAdminOrders(filters: Record<string, string> = {}): Pr
   return Array.isArray(response) ? response : response.results ?? [];
 }
 
+export async function fetchAdminOrderDetail(orderId: number): Promise<ApiOrder> {
+  return apiGet<ApiOrder>(`/admin/orders/${orderId}`);
+}
+
 export async function updateAdminOrderStatus(
   orderId: number,
   data: {

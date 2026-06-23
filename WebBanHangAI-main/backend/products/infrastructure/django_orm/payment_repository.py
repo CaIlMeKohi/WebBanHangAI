@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from products.application.customer_context import get_customer_for_user
 from products.domain.common.exceptions import NotFoundError
-from products.models import Order, Payment, PaymentWebhookLog
+from products.models import Notification, Order, Payment, PaymentWebhookLog
 
 
 class DjangoOrmPaymentRepository:
@@ -44,6 +44,7 @@ class DjangoOrmPaymentRepository:
             raise NotFoundError('Payment not found')
 
         success = bool(payload.get('success'))
+        was_paid = payment.order.payment_status == 'paid'
         payment.status = 'success' if success else 'failed'
         payment.transaction_id = payload.get('transaction_id') or payment.transaction_id
         payment.paid_at = timezone.now() if success else payment.paid_at
@@ -51,6 +52,14 @@ class DjangoOrmPaymentRepository:
 
         payment.order.payment_status = 'paid' if success else 'failed'
         payment.order.save(update_fields=['payment_status', 'updated_at'])
+
+        if success and not was_paid:
+            Notification.objects.create(
+                user=payment.order.user.user,
+                title='Thanh toán thành công',
+                content=f'Đơn hàng #{payment.order_id} đã được thanh toán thành công.',
+                notification_type='payment',
+            )
 
         webhook.processed = True
         webhook.process_message = 'success' if success else 'failed'

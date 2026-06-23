@@ -63,6 +63,7 @@ type MockOrder = {
   date: string;
   status: string;
   statusRaw: string;
+  cancelRequestStatus?: "pending" | "approved" | "rejected" | null;
   total: number;
   shippingAddress?: ApiOrder["shipping_address"];
   paymentMethod?: string;
@@ -284,6 +285,7 @@ export function Profile() {
             date: new Date(order.created_at).toLocaleDateString("vi-VN"),
             status: getOrderStatusLabel(order.status),
             statusRaw: order.status,
+            cancelRequestStatus: order.cancel_request_status,
             total: order.final_amount,
             shippingAddress: order.shipping_address,
             paymentMethod: order.payment_method,
@@ -529,18 +531,18 @@ export function Profile() {
       setMockOrders((current) =>
         current.map((item) =>
           item.orderId === cancelOrderTarget.orderId
-            ? { ...item, status: getOrderStatusLabel(updatedOrder.status), statusRaw: updatedOrder.status }
+            ? { ...item, cancelRequestStatus: updatedOrder.cancel_request_status ?? "pending" }
             : item,
         ),
       );
       setSelectedOrder((current) =>
         current?.orderId === cancelOrderTarget.orderId
-          ? { ...current, status: getOrderStatusLabel(updatedOrder.status), statusRaw: updatedOrder.status }
+          ? { ...current, cancelRequestStatus: updatedOrder.cancel_request_status ?? "pending" }
           : current,
       );
       setCancelOrderTarget(null);
       setCancelReason("");
-      setOrderMessage("Đã hủy đơn hàng thành công.");
+      setOrderMessage("Đã gửi yêu cầu hủy đơn. Vui lòng chờ nhân viên duyệt.");
     } catch (error) {
       setCancelOrderError(error instanceof Error ? error.message : "Không thể hủy đơn hàng.");
     } finally {
@@ -967,7 +969,7 @@ export function Profile() {
                                 Xác nhận đã nhận hàng
                               </button>
                             )}
-                            {["pending", "confirmed", "processing"].includes(order.statusRaw) && (
+                            {["pending", "confirmed", "processing"].includes(order.statusRaw) && order.cancelRequestStatus !== "pending" && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -979,6 +981,11 @@ export function Profile() {
                               >
                                 Hủy đơn
                               </button>
+                            )}
+                            {order.cancelRequestStatus === "pending" && (
+                              <span className="flex-1 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-center text-sm text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                                Đang chờ duyệt hủy
+                              </span>
                             )}
                             {order.statusRaw === "completed" && (
                               <button

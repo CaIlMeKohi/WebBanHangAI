@@ -235,6 +235,23 @@ class StaffReturnStatusAPIView(APIView):
         if next_status == 'rejected' and not request.data.get('reason'):
             return Response({'detail': 'Tu choi phai ghi ly do'}, status=status.HTTP_400_BAD_REQUEST)
         old = item.status
+        is_cancel_request = item.desired_solution == 'cancel_order'
+        if is_cancel_request and old != 'pending':
+            return Response({'detail': 'Yeu cau huy don da duoc xu ly'}, status=status.HTTP_400_BAD_REQUEST)
+        if is_cancel_request and next_status not in {'approved', 'rejected'}:
+            return Response({'detail': 'Yeu cau huy don chi co the duyet hoac tu choi'}, status=status.HTTP_400_BAD_REQUEST)
+        if is_cancel_request and next_status == 'approved':
+            if item.order.status not in {'pending', 'confirmed', 'processing'}:
+                return Response({'detail': 'Don hang khong con o trang thai co the huy'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                cancel_order_and_restore_stock(
+                    item.order_id,
+                    request.user.user_id,
+                    item.reason or f'Customer cancellation request #{item.return_id}',
+                )
+            except DatabaseError:
+                transaction.set_rollback(True)
+                return Response({'detail': 'Khong the huy don va hoan kho'}, status=status.HTTP_400_BAD_REQUEST)
         item.status = next_status
         item.reject_reason = request.data.get('reason', '') if next_status == 'rejected' else item.reject_reason
         item.processed_by = staff_for(request.user)
@@ -252,7 +269,13 @@ class StaffReturnStatusAPIView(APIView):
             except DatabaseError:
                 transaction.set_rollback(True)
                 return Response({'detail': 'Khong the hoan tien/nhap lai kho cho yeu cau doi tra'}, status=status.HTTP_400_BAD_REQUEST)
-        notify(item.user.user, 'Cap nhat yeu cau doi tra', f'Yeu cau #{item.return_id} da chuyen sang {next_status}', 'return')
+        if is_cancel_request:
+            if next_status == 'approved':
+                notify(item.user.user, 'Hủy đơn thành công', f'Đơn hàng #{item.order_id} đã được nhân viên duyệt hủy.', 'order_cancel')
+            else:
+                notify(item.user.user, 'Yêu cầu hủy đơn bị từ chối', f'Đơn hàng #{item.order_id} chưa được hủy. Lý do: {item.reject_reason}', 'order_cancel')
+        else:
+            notify(item.user.user, 'Cap nhat yeu cau doi tra', f'Yeu cau #{item.return_id} da chuyen sang {next_status}', 'return')
         return Response(ReturnRequestSerializer(item).data)
 
 
