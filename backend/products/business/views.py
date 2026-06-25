@@ -244,7 +244,7 @@ class StaffReturnStatusAPIView(APIView):
         if is_cancel_request and next_status not in {'approved', 'rejected'}:
             return Response({'detail': 'Yeu cau huy don chi co the duyet hoac tu choi'}, status=status.HTTP_400_BAD_REQUEST)
         if is_cancel_request and next_status == 'approved':
-            if item.order.status not in {'pending', 'confirmed', 'processing'}:
+            if item.order.status not in {'pending_payment', 'pending', 'confirmed', 'processing'}:
                 return Response({'detail': 'Don hang khong con o trang thai co the huy'}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 cancel_order_and_restore_stock(

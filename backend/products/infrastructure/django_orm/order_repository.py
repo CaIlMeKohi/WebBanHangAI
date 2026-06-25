@@ -167,7 +167,7 @@ class DjangoOrmOrderRepository:
         order = Order.objects.filter(order_id=order_id, user=customer).first()
         if order is None:
             raise NotFoundError('Order not found')
-        if order.status not in {'pending', 'confirmed', 'processing'}:
+        if order.status not in {'pending_payment', 'pending', 'confirmed', 'processing'}:
             raise BusinessRuleViolation('Khong the huy don o trang thai hien tai')
         images = list(payload.images or [])
         if not images:

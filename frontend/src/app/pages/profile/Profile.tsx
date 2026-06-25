@@ -995,7 +995,7 @@ export function Profile() {
                                 Xác nhận đã nhận hàng
                               </button>
                             )}
-                            {["pending", "confirmed", "processing"].includes(order.statusRaw) && order.cancelRequestStatus !== "pending" && (
+                            {["pending_payment", "pending", "confirmed", "processing"].includes(order.statusRaw) && order.cancelRequestStatus !== "pending" && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1014,14 +1014,14 @@ export function Profile() {
                                 Đang chờ duyệt hủy
                               </span>
                             )}
-                            {order.statusRaw === "pending" &&
+                            {order.statusRaw === "pending_payment" &&
                               order.paymentMethod === "payos" &&
                               order.paymentStatus === "pending" && (
                                 <Link
                                   to={`/payment/result?orderCode=${order.orderId}`}
                                   className="flex-1 rounded bg-sky-600 py-2 text-center text-sm font-medium text-white hover:bg-sky-700"
                                 >
-                                  Thanh toán / đổi COD
+                                  Thanh toán
                                 </Link>
                               )}
                             {order.statusRaw === "cancelled" && order.paymentMethod === "payos" && (
