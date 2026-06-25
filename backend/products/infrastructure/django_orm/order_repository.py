@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django.db import DatabaseError, models, transaction
+from django.db import DatabaseError, IntegrityError, models, transaction
 from django.utils import timezone
 
 from products.application.cart_service import get_customer_cart_items
@@ -164,6 +164,8 @@ class DjangoOrmOrderRepository:
         return order
 
     def cancel_customer_order(self, user, customer, order_id: int, payload):
+        if user is None or customer is None:
+            raise BusinessRuleViolation('Vui long dang nhap truoc khi huy don')
         order = Order.objects.filter(order_id=order_id, user=customer).first()
         if order is None:
             raise NotFoundError('Order not found')
@@ -184,30 +186,34 @@ class DjangoOrmOrderRepository:
                 image_urls.append(upload_image(image, 'fashion-shop/cancellations'))
             except RuntimeError as exc:
                 raise BusinessRuleViolation(str(exc)) from exc
-        request_item = ReturnRequest.objects.create(
-            user=customer,
-            order=order,
-            reason=payload.reason,
-            desired_solution='cancel_order',
-            evidence_image_urls=','.join(image_urls),
-        )
-        ReturnRequestImage.objects.bulk_create([
-            ReturnRequestImage(return_request=request_item, image_url=image_url[:500])
-            for image_url in image_urls
-        ])
-        Notification.objects.create(
-            user=user,
-            title='Da gui yeu cau huy don',
-            content=f'Yeu cau huy don #{order.order_id} dang cho nhan vien duyet.',
-            notification_type='order_cancel',
-        )
-        AuditLog.objects.create(
-            actor=user,
-            action='request_order_cancellation',
-            entity_type='order',
-            entity_id=str(order.order_id),
-            metadata={'return_request_id': request_item.return_id, 'reason': payload.reason, 'image_count': len(image_urls)},
-        )
+        try:
+            with transaction.atomic():
+                request_item = ReturnRequest.objects.create(
+                    user=customer,
+                    order=order,
+                    reason=payload.reason,
+                    desired_solution='cancel_order',
+                    evidence_image_urls=','.join(image_urls),
+                )
+                ReturnRequestImage.objects.bulk_create([
+                    ReturnRequestImage(return_request=request_item, image_url=image_url[:500])
+                    for image_url in image_urls
+                ])
+                Notification.objects.create(
+                    user=user,
+                    title='Da gui yeu cau huy don',
+                    content=f'Yeu cau huy don #{order.order_id} dang cho nhan vien duyet.',
+                    notification_type='order_cancel',
+                )
+                AuditLog.objects.create(
+                    actor=user,
+                    action='request_order_cancellation',
+                    entity_type='order',
+                    entity_id=str(order.order_id),
+                    metadata={'return_request_id': request_item.return_id, 'reason': payload.reason, 'image_count': len(image_urls)},
+                )
+        except (DatabaseError, IntegrityError) as exc:
+            raise BusinessRuleViolation(f'Khong the gui yeu cau huy don: {exc}') from exc
         return order
 
     def confirm_customer_order_received(self, user, customer, order_id: int):
