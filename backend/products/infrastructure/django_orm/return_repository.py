@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from datetime import timedelta
 
 from django.utils import timezone
@@ -30,7 +32,7 @@ class DjangoOrmReturnRepository:
             order_item_id=payload.get('order_item_id'),
             reason=reason,
             desired_solution=payload.get('desired_solution', ''),
-            evidence_image_urls=','.join(str(image_url)[:500] for image_url in images),
+            evidence_image_urls=json.dumps([str(image_url)[:500] for image_url in images], ensure_ascii=False),
         )
         ReturnRequestImage.objects.bulk_create([
             ReturnRequestImage(return_request=item, image_url=str(image_url)[:500])

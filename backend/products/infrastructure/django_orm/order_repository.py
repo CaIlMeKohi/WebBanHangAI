@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from django.db import DatabaseError, IntegrityError, models, transaction
 from django.utils import timezone
 
@@ -193,7 +195,7 @@ class DjangoOrmOrderRepository:
                     order=order,
                     reason=payload.reason,
                     desired_solution='cancel_order',
-                    evidence_image_urls=','.join(image_urls),
+                    evidence_image_urls=json.dumps(image_urls, ensure_ascii=False),
                 )
                 ReturnRequestImage.objects.bulk_create([
                     ReturnRequestImage(return_request=request_item, image_url=image_url[:500])
