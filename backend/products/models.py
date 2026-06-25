@@ -359,6 +359,7 @@ class CouponUsage(models.Model):
 
 class Order(models.Model):
     STATUS_CHOICES = [
+        ('pending_payment', 'Pending payment'),
         ('pending', 'Pending'),
         ('confirmed', 'Confirmed'),
         ('processing', 'Processing'),

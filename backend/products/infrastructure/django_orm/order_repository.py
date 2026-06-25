@@ -49,6 +49,7 @@ class DjangoOrmOrderRepository:
     def list_staff_orders(self, filters: dict):
         queryset = (
             Order.objects.filter(status__in=[
+                'pending_payment',
                 'pending',
                 'confirmed',
                 'processing',
@@ -122,6 +123,7 @@ class DjangoOrmOrderRepository:
             discount_amount=discount_amount,
             coupon=coupon,
             final_amount=max(0, subtotal + shipping_fee - discount_amount),
+            status='pending' if payload.payment_method == 'cod' else 'pending_payment',
             payment_method=payload.payment_method,
             payment_status='unpaid' if payload.payment_method == 'cod' else 'pending',
         )

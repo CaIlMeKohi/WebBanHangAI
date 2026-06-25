@@ -16,7 +16,7 @@ import { usePortalLightTheme } from "../../lib/usePortalLightTheme";
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
 const STAFF_API_BASE = "";
 
-type OrderStatus = "pending" | "confirmed" | "processing" | "waiting_pickup" | "shipped" | "delivered" | "completed" | "cancelled";
+type OrderStatus = "pending_payment" | "pending" | "confirmed" | "processing" | "waiting_pickup" | "shipped" | "delivered" | "completed" | "cancelled";
 
 type StaffOrder = {
   order_id: number;
@@ -95,6 +95,7 @@ type StockVariantOption = {
 };
 
 const nextStatuses: Record<OrderStatus, OrderStatus[]> = {
+  pending_payment: [],
   pending: ["confirmed", "cancelled"],
   confirmed: ["processing", "cancelled"],
   processing: ["waiting_pickup", "cancelled"],
@@ -106,6 +107,7 @@ const nextStatuses: Record<OrderStatus, OrderStatus[]> = {
 };
 
 const statusLabels: Record<OrderStatus, string> = {
+  pending_payment: "Chờ thanh toán",
   pending: "Chờ xử lý",
   confirmed: "Xác nhận",
   processing: "Đang xử lý",
@@ -117,6 +119,7 @@ const statusLabels: Record<OrderStatus, string> = {
 };
 
 const actionLabels: Record<OrderStatus, string> = {
+  pending_payment: "Chờ thanh toán",
   pending: "Chờ xử lý",
   confirmed: "Xác nhận",
   processing: "Đang xử lý",

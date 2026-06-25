@@ -144,7 +144,7 @@ async function buildApiError(response: Response): Promise<Error> {
 }
 
 function isInvalidAuthResponse(status: number, detail: unknown) {
-  if (![401, 403].includes(status)) return false;
+  if (status !== 401) return false;
   const message = String(detail ?? "").toLowerCase();
   return (
     message.includes("token") ||

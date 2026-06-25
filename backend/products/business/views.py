@@ -329,6 +329,7 @@ class StaffOrderConfirmAPIView(APIView):
 class StaffOrderStatusAPIView(APIView):
     permission_classes = [IsStaff]
     transitions = {
+        'pending_payment': set(),
         'pending': {'confirmed', 'cancelled'},
         'confirmed': {'processing', 'cancelled'},
         'processing': {'waiting_pickup', 'cancelled'},

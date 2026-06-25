@@ -36,7 +36,7 @@ export function PaymentResult() {
         setPayment(next);
         setError("");
         setLoading(false);
-        if (next.payment_status === "pending" && next.order_status === "pending") {
+        if (next.payment_status === "pending" && next.order_status === "pending_payment") {
           timer = window.setTimeout(refresh, 3000);
         }
       } catch (err) {

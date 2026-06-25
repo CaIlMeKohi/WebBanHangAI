@@ -1372,6 +1372,7 @@ export function Profile() {
 }
 function getOrderStatusLabel(status: string) {
   const labels: Record<string, string> = {
+    pending_payment: "Chờ thanh toán",
     pending: "Chờ xử lý",
     confirmed: "Xác nhận",
     processing: "Đang xử lý",

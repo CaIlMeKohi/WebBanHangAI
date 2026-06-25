@@ -163,7 +163,7 @@ class DjangoOrmPaymentRepository:
             'expires_at': self._expiration(order, payment).isoformat() if payment else None,
             'can_switch_to_cod': bool(
                 payment
-                and order.status == 'pending'
+                and order.status in {'pending_payment', 'pending'}
                 and order.payment_method == 'payos'
                 and order.payment_status == 'pending'
                 and not self._is_expired(order, payment)
@@ -197,8 +197,9 @@ class DjangoOrmPaymentRepository:
             locked_payment = Payment.objects.select_for_update().get(payment_id=payment.payment_id)
             locked_order.payment_method = 'cod'
             locked_order.payment_status = 'unpaid'
+            locked_order.status = 'pending'
             locked_order.payment_expires_at = None
-            locked_order.save(update_fields=['payment_method', 'payment_status', 'payment_expires_at', 'updated_at'])
+            locked_order.save(update_fields=['payment_method', 'payment_status', 'status', 'payment_expires_at', 'updated_at'])
             locked_payment.payment_method = 'cod'
             locked_payment.status = 'pending'
             locked_payment.failure_reason = 'payOS cancelled because customer switched to COD'
@@ -258,7 +259,9 @@ class DjangoOrmPaymentRepository:
             locked_payment.paid_at = timezone.now()
             locked_payment.save(update_fields=['status', 'transaction_id', 'paid_at'])
             locked_payment.order.payment_status = 'paid'
-            locked_payment.order.save(update_fields=['payment_status', 'updated_at'])
+            if locked_payment.order.status == 'pending_payment':
+                locked_payment.order.status = 'pending'
+            locked_payment.order.save(update_fields=['payment_status', 'status', 'updated_at'])
             Notification.objects.create(
                 user=locked_payment.order.user.user,
                 title='Thanh toán thành công',
@@ -311,7 +314,7 @@ class DjangoOrmPaymentRepository:
         payments = Payment.objects.select_related('order').filter(
             payment_method='payos',
             status='pending',
-            order__status='pending',
+            order__status='pending_payment',
             order__payment_status='pending',
         )
         expired = 0

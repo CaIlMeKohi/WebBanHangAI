@@ -55,6 +55,7 @@ type AdminOrderItem = AdminOrder["items"][number] & {
 };
 
 const statusLabels: Record<string, string> = {
+  pending_payment: "Chờ thanh toán",
   pending: "Chờ xử lý",
   confirmed: "Xác nhận",
   processing: "Đang xử lý",
