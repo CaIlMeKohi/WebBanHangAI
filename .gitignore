@@ -1,0 +1,54 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+
+# Python
+backend/venv/
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/db.sqlite3
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/**/*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime and uploaded files
+backend/media/
+tmp_logs/
+*.log
+backups/
+
+# Local tooling and temporary files
+.agents/
+.codex/
+temp_repo/
+DuaLenCodex/
+.tmp_docx_extract/
+*.zip
+backend/db_inspect.py
+backend/debug_api_probe.py
+backend/database/*.dbml
+backend/database/generate_dbml.py
+
+# Internal reports and generated documentation
+docs/
+*.md
+!README.md
+
+# IDE and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
