@@ -129,6 +129,7 @@ export function Profile() {
   const [orderMessage, setOrderMessage] = useState("");
   const [cancelOrderTarget, setCancelOrderTarget] = useState<MockOrder | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [cancelImages, setCancelImages] = useState<File[]>([]);
   const [cancelOrderError, setCancelOrderError] = useState("");
   const [isCancellingOrder, setIsCancellingOrder] = useState(false);
   const [repurchaseNotice, setRepurchaseNotice] = useState("");
@@ -543,10 +544,15 @@ export function Profile() {
       return;
     }
 
+    if (cancelImages.length === 0) {
+      setCancelOrderError("Vui lòng gửi ít nhất 1 ảnh khi hủy đơn.");
+      return;
+    }
+
     setIsCancellingOrder(true);
     setCancelOrderError("");
     try {
-      const updatedOrder = await cancelCustomerOrder(cancelOrderTarget.orderId, reason);
+      const updatedOrder = await cancelCustomerOrder(cancelOrderTarget.orderId, reason, cancelImages);
       setMockOrders((current) =>
         current.map((item) =>
           item.orderId === cancelOrderTarget.orderId
@@ -561,6 +567,7 @@ export function Profile() {
       );
       setCancelOrderTarget(null);
       setCancelReason("");
+      setCancelImages([]);
       setOrderMessage("Đã gửi yêu cầu hủy đơn. Vui lòng chờ nhân viên duyệt.");
     } catch (error) {
       setCancelOrderError(error instanceof Error ? error.message : "Không thể hủy đơn hàng.");
@@ -994,6 +1001,7 @@ export function Profile() {
                                 onClick={() => {
                                   setCancelOrderTarget(order);
                                   setCancelReason("");
+                                  setCancelImages([]);
                                   setCancelOrderError("");
                                 }}
                                 className="flex-1 rounded border border-red-300 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/30"
@@ -1256,6 +1264,29 @@ export function Profile() {
                       className="mt-2 w-full resize-none rounded border border-neutral-300 px-3 py-2 outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:focus:border-white"
                     />
                   </label>
+                  <label className="mt-4 block text-sm font-medium">
+                    Ảnh minh chứng <span className="text-red-600">*</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      required
+                      onChange={(event) => setCancelImages(Array.from(event.target.files ?? []))}
+                      className="mt-2 block w-full text-sm"
+                    />
+                  </label>
+                  {cancelImages.length > 0 && (
+                    <div className="mt-3 grid grid-cols-4 gap-2">
+                      {cancelImages.map((image) => (
+                        <img
+                          key={`${image.name}-${image.lastModified}`}
+                          src={URL.createObjectURL(image)}
+                          alt={image.name}
+                          className="h-16 w-16 rounded object-cover"
+                        />
+                      ))}
+                    </div>
+                  )}
                   {cancelOrderError && (
                     <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
                       {cancelOrderError}
@@ -1265,14 +1296,17 @@ export function Profile() {
                     <button
                       type="button"
                       disabled={isCancellingOrder}
-                      onClick={() => setCancelOrderTarget(null)}
+                      onClick={() => {
+                        setCancelOrderTarget(null);
+                        setCancelImages([]);
+                      }}
                       className="rounded border px-4 py-2 text-sm disabled:opacity-50"
                     >
                       Không hủy
                     </button>
                     <button
                       type="submit"
-                      disabled={isCancellingOrder || !cancelReason.trim()}
+                      disabled={isCancellingOrder || !cancelReason.trim() || cancelImages.length === 0}
                       className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
                     >
                       {isCancellingOrder ? "Đang hủy..." : "Xác nhận hủy đơn"}

@@ -1,5 +1,5 @@
 import type { Product } from "../../data/products";
-import { apiGet, apiPost } from "../apiClient";
+import { apiGet, apiPost, apiPostMultipart } from "../apiClient";
 
 export interface ApiOrder {
   order_id: number;
@@ -76,6 +76,11 @@ export async function confirmOrderReceived(orderId: number): Promise<ApiOrder> {
   return apiPost<ApiOrder>(`/products/orders/${orderId}/confirm-received/`, {});
 }
 
-export async function cancelCustomerOrder(orderId: number, reason: string): Promise<ApiOrder> {
-  return apiPost<ApiOrder>(`/products/orders/${orderId}/cancel/`, { reason });
+export async function cancelCustomerOrder(orderId: number, reason: string, images: File[]): Promise<ApiOrder> {
+  const formData = new FormData();
+  formData.append("reason", reason);
+  for (const image of images) {
+    formData.append("images", image);
+  }
+  return apiPostMultipart<ApiOrder>(`/products/orders/${orderId}/cancel/`, formData);
 }

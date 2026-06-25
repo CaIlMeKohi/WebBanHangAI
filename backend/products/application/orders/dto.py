@@ -61,10 +61,16 @@ class CreateOrderDTO:
 @dataclass(frozen=True)
 class CancelOrderDTO:
     reason: str = 'Customer cancelled order'
+    images: list[Any] | None = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> 'CancelOrderDTO':
-        return cls(reason=payload.get('reason') or 'Customer cancelled order')
+        images = payload.get('images') or []
+        if hasattr(payload, 'getlist'):
+            images = payload.getlist('images')
+        elif not isinstance(images, list):
+            images = [images]
+        return cls(reason=payload.get('reason') or 'Customer cancelled order', images=images)
 
 
 @dataclass(frozen=True)

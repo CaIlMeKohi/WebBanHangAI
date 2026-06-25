@@ -8,7 +8,8 @@ from products.domain.common.exceptions import BusinessRuleViolation, NotFoundErr
 from products.infrastructure.django_orm.coupon_repository import _calculate_discount
 from products.infrastructure.stored_procedures import cancel_order_and_restore_stock, check_variant_stock, decrease_variant_stock, update_order_status
 from products.models import Order
-from products.models import Address, AuditLog, CartItem, Coupon, CouponUsage, Notification, OrderItem, OrderStatusHistory, Payment, RecommendationLog, ReturnRequest, Shipment, StaffProfile, UserInteraction
+from products.models import Address, AuditLog, CartItem, Coupon, CouponUsage, Notification, OrderItem, OrderStatusHistory, Payment, RecommendationLog, ReturnRequest, ReturnRequestImage, Shipment, StaffProfile, UserInteraction
+from products.services.cloudinary_service import upload_image
 from products.services.email_service import send_order_confirmation
 
 
@@ -168,18 +169,32 @@ class DjangoOrmOrderRepository:
             raise NotFoundError('Order not found')
         if order.status not in {'pending', 'confirmed', 'processing'}:
             raise BusinessRuleViolation('Khong the huy don o trang thai hien tai')
+        images = list(payload.images or [])
+        if not images:
+            raise BusinessRuleViolation('Vui long gui it nhat 1 anh khi huy don')
         if ReturnRequest.objects.filter(
             order=order,
             desired_solution='cancel_order',
             status='pending',
         ).exists():
             raise BusinessRuleViolation('Yeu cau huy don dang cho nhan vien duyet')
+        image_urls = []
+        for image in images:
+            try:
+                image_urls.append(upload_image(image, 'fashion-shop/cancellations'))
+            except RuntimeError as exc:
+                raise BusinessRuleViolation(str(exc)) from exc
         request_item = ReturnRequest.objects.create(
             user=customer,
             order=order,
             reason=payload.reason,
             desired_solution='cancel_order',
+            evidence_image_urls=','.join(image_urls),
         )
+        ReturnRequestImage.objects.bulk_create([
+            ReturnRequestImage(return_request=request_item, image_url=image_url[:500])
+            for image_url in image_urls
+        ])
         Notification.objects.create(
             user=user,
             title='Da gui yeu cau huy don',
@@ -191,7 +206,7 @@ class DjangoOrmOrderRepository:
             action='request_order_cancellation',
             entity_type='order',
             entity_id=str(order.order_id),
-            metadata={'return_request_id': request_item.return_id, 'reason': payload.reason},
+            metadata={'return_request_id': request_item.return_id, 'reason': payload.reason, 'image_count': len(image_urls)},
         )
         return order
 
