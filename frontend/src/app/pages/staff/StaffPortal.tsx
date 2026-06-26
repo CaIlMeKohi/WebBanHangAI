@@ -194,6 +194,7 @@ function StaffPortalContent() {
   const [lowStock, setLowStock] = useState<any[]>([]);
   const [stockVariants, setStockVariants] = useState<StockVariantOption[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<StaffOrder | null>(null);
+  const [updatingOrderId, setUpdatingOrderId] = useState<number | null>(null);
   const [filters, setFilters] = useState({ status: "", payment_method: "", from_date: "", to_date: "" });
   const [message, setMessage] = useState("");
   const [stockModal, setStockModal] = useState<StockAction | null>(null);
@@ -272,6 +273,7 @@ function StaffPortalContent() {
   }, [activePortalTab, catalogCategory, catalogPage, catalogSearch]);
 
   async function updateOrder(orderId: number, status: OrderStatus) {
+    if (updatingOrderId === orderId) return;
     if (status === "waiting_pickup") {
       const order = orders.find((item) => item.order_id === orderId) ?? null;
       setShipmentOrder(order);
@@ -279,6 +281,8 @@ function StaffPortalContent() {
       setShipmentError("");
       return;
     }
+    setUpdatingOrderId(orderId);
+    setMessage("");
     try {
       const body: Record<string, string> = { status };
       await api(`${STAFF_API_BASE}/staff/orders/${orderId}/status`, { method: "PUT", body: JSON.stringify(body) });
@@ -286,6 +290,8 @@ function StaffPortalContent() {
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật đơn hàng");
+    } finally {
+      setUpdatingOrderId(null);
     }
   }
 
@@ -532,8 +538,13 @@ function StaffPortalContent() {
                     <td className="space-x-2 px-2 py-3">
                       <button className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium hover:border-neutral-400 hover:bg-neutral-50" onClick={() => setSelectedOrder(order)}>Chi tiết sản phẩm</button>
                       {(nextStatuses[order.status] ?? []).map((status) => (
-                        <button key={status} className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium hover:border-neutral-400 hover:bg-neutral-50" onClick={() => updateOrder(order.order_id, status)}>
-                          {actionLabels[status] ?? status}
+                        <button
+                          key={status}
+                          disabled={updatingOrderId === order.order_id}
+                          className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-medium hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => updateOrder(order.order_id, status)}
+                        >
+                          {updatingOrderId === order.order_id ? "Đang cập nhật..." : actionLabels[status] ?? status}
                         </button>
                       ))}
                     </td>
