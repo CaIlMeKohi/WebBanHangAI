@@ -205,7 +205,7 @@ class DjangoOrmOrderRepository:
                     user=user,
                     title='Da gui yeu cau huy don',
                     content=f'Yeu cau huy don #{order.order_id} dang cho nhan vien duyet.',
-                    notification_type='order_cancel',
+                    notification_type='return_request',
                 )
                 AuditLog.objects.create(
                     actor=user,
