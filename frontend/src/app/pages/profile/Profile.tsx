@@ -131,6 +131,12 @@ function formatBirthday(value?: string | null) {
   return date.toLocaleDateString("vi-VN");
 }
 
+function getAdultMaxBirthday() {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - 18);
+  return date.toISOString().slice(0, 10);
+}
+
 export function Profile() {
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "profile";
@@ -189,6 +195,7 @@ export function Profile() {
   const [settingsMessage, setSettingsMessage] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const adultMaxBirthday = getAdultMaxBirthday();
 
   function closeSettingsModal() {
     setSettingsModal(null);
@@ -1296,7 +1303,7 @@ export function Profile() {
                   {settingsError && <div className="rounded bg-red-50 p-3 text-sm text-red-700">{settingsError}</div>}
                   <label className="block text-sm font-medium">Họ và tên<input required value={editProfile.full_name} onChange={(e) => setEditProfile({ ...editProfile, full_name: e.target.value })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" /></label>
                   <label className="block text-sm font-medium">Số điện thoại<input value={editProfile.phone} onChange={(e) => setEditProfile({ ...editProfile, phone: e.target.value })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" /></label>
-                  <label className="block text-sm font-medium">Ngày sinh<input type="date" value={editProfile.birthday || ""} onChange={(e) => setEditProfile({ ...editProfile, birthday: e.target.value })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" /></label>
+                  <label className="block text-sm font-medium">Ngày sinh<input type="date" value={editProfile.birthday || ""} max={adultMaxBirthday} onChange={(e) => setEditProfile({ ...editProfile, birthday: e.target.value })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" /></label>
                   <label className="block text-sm font-medium">
                     Giới tính
                     <select value={editProfile.gender || "unknown"} onChange={(e) => setEditProfile({ ...editProfile, gender: e.target.value as ProfileGender })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950">

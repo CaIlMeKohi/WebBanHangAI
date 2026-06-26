@@ -264,7 +264,19 @@ class ProfileAPIView(APIView):
                 return Response({'detail': 'Gioi tinh khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
             profile.gender = gender
         if 'birthday' in request.data:
-            profile.birthday = request.data.get('birthday') or None
+            birthday = request.data.get('birthday') or None
+            if birthday:
+                try:
+                    birthday_date = timezone.datetime.strptime(str(birthday), '%Y-%m-%d').date()
+                except ValueError:
+                    return Response({'detail': 'Ngay sinh khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
+                today = timezone.localdate()
+                age = today.year - birthday_date.year - ((today.month, today.day) < (birthday_date.month, birthday_date.day))
+                if age < 18:
+                    return Response({'detail': 'Ban phai du 18 tuoi moi duoc cap nhat ngay sinh nay'}, status=status.HTTP_400_BAD_REQUEST)
+                profile.birthday = birthday_date
+            else:
+                profile.birthday = None
         profile.preferred_size = request.data.get('preferred_size', profile.preferred_size)
         profile.preferred_color = request.data.get('preferred_color', profile.preferred_color)
         profile.preferred_style = request.data.get('preferred_style', profile.preferred_style)

@@ -5,6 +5,12 @@ import { AlertCircle, Eye, EyeOff, UserPlus } from "lucide-react";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 import { resendRegistrationOtp, verifyRegistrationOtp } from "../../lib/api";
 
+function getAdultMaxBirthday() {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - 18);
+  return date.toISOString().slice(0, 10);
+}
+
 export function Register() {
   const navigate = useNavigate();
   const { register, isLoggedIn, role } = useAdminAuth();
@@ -26,6 +32,7 @@ export function Register() {
   const [otp, setOtp] = useState("");
   const [otpEmail, setOtpEmail] = useState("");
   const [notice, setNotice] = useState("");
+  const adultMaxBirthday = getAdultMaxBirthday();
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -46,6 +53,11 @@ export function Register() {
 
     if (password !== confirmPassword) {
       setError("Mật khẩu xác nhận không khớp");
+      return;
+    }
+
+    if (birthday && birthday > adultMaxBirthday) {
+      setError("Bạn phải đủ 18 tuổi mới được đăng ký");
       return;
     }
 
@@ -201,6 +213,7 @@ export function Register() {
                 <input
                   type="date"
                   value={birthday}
+                  max={adultMaxBirthday}
                   onChange={(event) => setBirthday(event.target.value)}
                   className="w-full rounded-lg border border-neutral-300 px-4 py-2 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-neutral-900"
                   disabled={isLoading}

@@ -561,6 +561,15 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError('So dien thoai khong hop le.')
         return phone
 
+    def validate_birthday(self, value):
+        if value is None:
+            return value
+        today = timezone.localdate()
+        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+        if age < 18:
+            raise serializers.ValidationError('Ban phai du 18 tuoi moi duoc dang ky.')
+        return value
+
     def validate_password(self, value: str) -> str:
         if re.search(r'\s', value):
             raise serializers.ValidationError('Mat khau khong duoc chua khoang trang.')
