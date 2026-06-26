@@ -122,7 +122,7 @@ class DjangoOrmUserRepository:
         if user.locked_until and user.locked_until > timezone.now():
             remaining_seconds = max(1, int((user.locked_until - timezone.now()).total_seconds()))
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='temporarily_locked')
-            raise BusinessRuleViolation(f'Tai khoan dang bi khoa tam thoi. Vui long thu lai sau {remaining_seconds} giay.')
+            raise BusinessRuleViolation(f'Chuc nang dang nhap dang bi khoa tam thoi. Vui long thu lai sau {remaining_seconds} giay.')
         if user.locked_until and user.locked_until <= timezone.now():
             user.locked_until = None
             user.failed_login_count = 0
@@ -138,7 +138,7 @@ class DjangoOrmUserRepository:
             user.save(update_fields=update_fields)
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason=reason)
             if user.locked_until and user.locked_until > timezone.now():
-                raise BusinessRuleViolation(f'Sai mat khau qua {MAX_FAILED_LOGIN_ATTEMPTS} lan. Tai khoan bi khoa tam thoi {TEMP_LOCK_SECONDS} giay.')
+                raise BusinessRuleViolation(f'Sai mat khau qua {MAX_FAILED_LOGIN_ATTEMPTS} lan. Chuc nang dang nhap bi khoa tam thoi {TEMP_LOCK_SECONDS} giay.')
             raise BusinessRuleViolation('Invalid credentials')
 
         user.failed_login_count = 0
