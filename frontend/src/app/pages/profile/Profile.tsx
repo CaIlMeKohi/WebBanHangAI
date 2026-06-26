@@ -99,15 +99,49 @@ type UserAddress = {
   created_at: string;
 };
 
+type ProfileGender = "male" | "female" | "other" | "unknown";
+
+type ProfileState = {
+  full_name: string;
+  email: string;
+  phone: string;
+  gender: ProfileGender;
+  birthday: string;
+};
+
+type EditProfileState = Omit<ProfileState, "email">;
+
+function getGenderLabel(gender?: string | null) {
+  switch (gender) {
+    case "male":
+      return "Nam";
+    case "female":
+      return "Nữ";
+    case "other":
+      return "Khác";
+    default:
+      return "Chưa cập nhật";
+  }
+}
+
+function formatBirthday(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("vi-VN");
+}
+
 export function Profile() {
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "profile";
   const { isAuthReady, userId } = useAdminAuth();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState({
+  const [profile, setProfile] = useState<ProfileState>({
     full_name: "Nguyễn Văn A",
     email: "nguyenvana@example.com",
     phone: "0912345678",
+    gender: "unknown",
+    birthday: "",
   });
   const [mockOrders, setMockOrders] = useState<MockOrder[]>([]);
   const [cartItems, setCartItems] = useState<CartProduct[]>([]);
@@ -141,7 +175,12 @@ export function Profile() {
   const [reviewMessage, setReviewMessage] = useState("");
   const [reviewedOrderItems, setReviewedOrderItems] = useState<number[]>([]);
   const [settingsModal, setSettingsModal] = useState<"profile" | "password" | null>(null);
-  const [editProfile, setEditProfile] = useState({ full_name: "", phone: "" });
+  const [editProfile, setEditProfile] = useState<EditProfileState>({
+    full_name: "",
+    phone: "",
+    gender: "unknown",
+    birthday: "",
+  });
   const [passwordStep, setPasswordStep] = useState<"send" | "otp" | "password">("send");
   const [passwordOtp, setPasswordOtp] = useState("");
   const [passwordResetToken, setPasswordResetToken] = useState("");
@@ -168,7 +207,13 @@ export function Profile() {
     setSettingsLoading(true); setSettingsError("");
     try {
       const updated = await updateProfile(userId, editProfile);
-      setProfile((current) => ({ ...current, full_name: updated.full_name, phone: updated.phone || "" }));
+      setProfile((current) => ({
+        ...current,
+        full_name: updated.full_name,
+        phone: updated.phone || "",
+        gender: updated.gender || "unknown",
+        birthday: updated.birthday || "",
+      }));
       closeSettingsModal();
     } catch (error) { setSettingsError(error instanceof Error ? error.message : "Không thể cập nhật hồ sơ"); }
     finally { setSettingsLoading(false); }
@@ -274,7 +319,13 @@ export function Profile() {
             fetchCart(activeUserId),
           ],
         );
-        setProfile(apiProfile);
+        setProfile({
+          full_name: apiProfile.full_name,
+          email: apiProfile.email,
+          phone: apiProfile.phone || "",
+          gender: apiProfile.gender || "unknown",
+          birthday: apiProfile.birthday || "",
+        });
         try {
           setAddresses(await fetchAddresses(activeUserId));
         } catch {
@@ -691,6 +742,29 @@ export function Profile() {
                       <input
                         type="tel"
                         value={profile.phone}
+                        readOnly
+                        className="w-full rounded border border-neutral-200 bg-neutral-100 px-4 py-2 dark:border-neutral-700 dark:bg-neutral-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        Ngày sinh
+                      </label>
+                      <input
+                        type="text"
+                        value={formatBirthday(profile.birthday)}
+                        readOnly
+                        placeholder="Chưa cập nhật"
+                        className="w-full rounded border border-neutral-200 bg-neutral-100 px-4 py-2 dark:border-neutral-700 dark:bg-neutral-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        Giới tính
+                      </label>
+                      <input
+                        type="text"
+                        value={getGenderLabel(profile.gender)}
                         readOnly
                         className="w-full rounded border border-neutral-200 bg-neutral-100 px-4 py-2 dark:border-neutral-700 dark:bg-neutral-900"
                       />
@@ -1198,8 +1272,8 @@ export function Profile() {
               <div>
                 <h2 className="mb-6 text-2xl font-light tracking-wide">Cài đặt tài khoản</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <button type="button" onClick={() => { setEditProfile({ full_name: profile.full_name, phone: profile.phone }); setSettingsModal("profile"); }} className="rounded-lg border p-5 text-left hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800">
-                    <div className="font-medium">Chỉnh sửa hồ sơ</div><div className="mt-1 text-sm text-neutral-500">Cập nhật họ tên và số điện thoại.</div>
+                  <button type="button" onClick={() => { setEditProfile({ full_name: profile.full_name, phone: profile.phone, gender: profile.gender || "unknown", birthday: profile.birthday || "" }); setSettingsModal("profile"); }} className="rounded-lg border p-5 text-left hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800">
+                    <div className="font-medium">Sửa họ tên, SĐT, ngày sinh, giới tính</div><div className="mt-1 text-sm text-neutral-500">Cập nhật thông tin cá nhân của bạn.</div>
                   </button>
                   <button type="button" onClick={() => setSettingsModal("password")} className="rounded-lg border p-5 text-left hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800">
                     <div className="font-medium">Đổi mật khẩu</div><div className="mt-1 text-sm text-neutral-500">Xác nhận OTP gửi tới email trước khi đổi.</div>
@@ -1211,10 +1285,20 @@ export function Profile() {
             {settingsModal === "profile" && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                 <form onSubmit={saveProfileSettings} className="w-full max-w-md space-y-4 rounded-lg bg-white p-6 shadow-xl dark:bg-neutral-900">
-                  <h3 className="text-xl font-medium">Chỉnh sửa hồ sơ</h3>
+                  <h3 className="text-xl font-medium">Sửa thông tin cá nhân</h3>
                   {settingsError && <div className="rounded bg-red-50 p-3 text-sm text-red-700">{settingsError}</div>}
                   <label className="block text-sm font-medium">Họ và tên<input required value={editProfile.full_name} onChange={(e) => setEditProfile({ ...editProfile, full_name: e.target.value })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" /></label>
                   <label className="block text-sm font-medium">Số điện thoại<input value={editProfile.phone} onChange={(e) => setEditProfile({ ...editProfile, phone: e.target.value })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" /></label>
+                  <label className="block text-sm font-medium">Ngày sinh<input type="date" value={editProfile.birthday || ""} onChange={(e) => setEditProfile({ ...editProfile, birthday: e.target.value })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950" /></label>
+                  <label className="block text-sm font-medium">
+                    Giới tính
+                    <select value={editProfile.gender || "unknown"} onChange={(e) => setEditProfile({ ...editProfile, gender: e.target.value as ProfileGender })} className="mt-2 w-full rounded border px-3 py-2 dark:bg-neutral-950">
+                      <option value="unknown">Chưa cập nhật</option>
+                      <option value="male">Nam</option>
+                      <option value="female">Nữ</option>
+                      <option value="other">Khác</option>
+                    </select>
+                  </label>
                   <div className="flex gap-3"><button type="button" onClick={closeSettingsModal} className="flex-1 rounded border py-2">Hủy</button><button disabled={settingsLoading} className="flex-1 rounded bg-neutral-900 py-2 text-white dark:bg-white dark:text-neutral-900">Lưu</button></div>
                 </form>
               </div>

@@ -6,6 +6,8 @@ export interface ApiUser {
   full_name: string;
   email: string;
   phone: string;
+  gender?: "male" | "female" | "other" | "unknown";
+  birthday?: string | null;
   role: "customer" | "staff" | "admin";
 }
 
@@ -96,7 +98,7 @@ export async function fetchProfile(userId: number): Promise<ApiUser> {
 
 export async function updateProfile(
   userId: number,
-  data: Partial<Pick<ApiUser, "full_name" | "phone">>,
+  data: Partial<Pick<ApiUser, "full_name" | "phone" | "gender" | "birthday">>,
 ): Promise<ApiUser> {
   return apiPut<ApiUser>(`/products/profile/`, { user_id: userId, ...data });
 }

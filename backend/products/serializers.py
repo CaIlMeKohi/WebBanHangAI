@@ -505,18 +505,28 @@ class CategorySerializer(serializers.ModelSerializer):
 class StoreUserSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='email')
     full_name = serializers.SerializerMethodField()
+    gender = serializers.SerializerMethodField()
+    birthday = serializers.SerializerMethodField()
     is_active = serializers.SerializerMethodField()
 
     def get_full_name(self, obj: StoreUser) -> str:
         profile = getattr(obj, 'customer_profile', None)
         return profile.full_name if profile else obj.email
 
+    def get_gender(self, obj: StoreUser) -> str:
+        profile = getattr(obj, 'customer_profile', None)
+        return profile.gender if profile else 'unknown'
+
+    def get_birthday(self, obj: StoreUser) -> str | None:
+        profile = getattr(obj, 'customer_profile', None)
+        return profile.birthday.isoformat() if profile and profile.birthday else None
+
     def get_is_active(self, obj: StoreUser) -> bool:
         return obj.account_status == 'active'
 
     class Meta:
         model = StoreUser
-        fields = ['user_id', 'username', 'full_name', 'email', 'phone', 'role', 'is_active', 'created_at']
+        fields = ['user_id', 'username', 'full_name', 'email', 'phone', 'gender', 'birthday', 'role', 'is_active', 'created_at']
         read_only_fields = ['user_id', 'role', 'is_active', 'created_at']
 
 

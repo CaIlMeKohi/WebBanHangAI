@@ -249,15 +249,22 @@ class ProfileAPIView(APIView):
         if not user:
             return Response({'detail': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        user.phone = request.data.get('phone', user.phone)
+        if 'phone' in request.data:
+            user.phone = str(request.data.get('phone') or '').strip() or None
         user.save(update_fields=['phone'])
         profile, _ = Customer.objects.get_or_create(
             user=user,
             defaults={'customer_code': f'KH{user.user_id:06d}', 'full_name': user.email},
         )
-        profile.full_name = request.data.get('full_name', profile.full_name)
-        profile.gender = request.data.get('gender', profile.gender)
-        profile.birthday = request.data.get('birthday', profile.birthday)
+        if 'full_name' in request.data:
+            profile.full_name = str(request.data.get('full_name') or profile.full_name).strip()
+        if 'gender' in request.data:
+            gender = str(request.data.get('gender') or 'unknown').strip()
+            if gender not in {'male', 'female', 'other', 'unknown'}:
+                return Response({'detail': 'Gioi tinh khong hop le'}, status=status.HTTP_400_BAD_REQUEST)
+            profile.gender = gender
+        if 'birthday' in request.data:
+            profile.birthday = request.data.get('birthday') or None
         profile.preferred_size = request.data.get('preferred_size', profile.preferred_size)
         profile.preferred_color = request.data.get('preferred_color', profile.preferred_color)
         profile.preferred_style = request.data.get('preferred_style', profile.preferred_style)
