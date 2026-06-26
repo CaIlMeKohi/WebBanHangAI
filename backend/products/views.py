@@ -509,6 +509,7 @@ class StaffOrderListAPIView(APIView):
 
     def get(self, request):
         orders = Order.objects.filter(status__in=[
+            'pending_payment',
             'pending',
             'confirmed',
             'processing',

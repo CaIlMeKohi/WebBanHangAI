@@ -259,6 +259,7 @@ class DjangoOrmOrderRepository:
 
     def update_order_status(self, actor, order_id: int, payload):
         transitions = {
+            'pending_payment': set(),
             'pending': {'confirmed', 'cancelled'},
             'confirmed': {'processing', 'cancelled'},
             'processing': {'waiting_pickup', 'cancelled'},
