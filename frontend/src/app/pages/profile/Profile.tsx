@@ -215,6 +215,8 @@ export function Profile() {
         birthday: updated.birthday || "",
       }));
       closeSettingsModal();
+      setSettingsMessage("Cập nhật thành công!");
+      window.setTimeout(() => setSettingsMessage(""), 2000);
     } catch (error) { setSettingsError(error instanceof Error ? error.message : "Không thể cập nhật hồ sơ"); }
     finally { setSettingsLoading(false); }
   }
@@ -1271,6 +1273,11 @@ export function Profile() {
             {activeTab === "settings" && (
               <div>
                 <h2 className="mb-6 text-2xl font-light tracking-wide">Cài đặt tài khoản</h2>
+                {settingsMessage && !settingsModal && (
+                  <div className="mb-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">
+                    {settingsMessage}
+                  </div>
+                )}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <button type="button" onClick={() => { setEditProfile({ full_name: profile.full_name, phone: profile.phone, gender: profile.gender || "unknown", birthday: profile.birthday || "" }); setSettingsModal("profile"); }} className="rounded-lg border p-5 text-left hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800">
                     <div className="font-medium">Sửa họ tên, SĐT, ngày sinh, giới tính</div><div className="mt-1 text-sm text-neutral-500">Cập nhật thông tin cá nhân của bạn.</div>
