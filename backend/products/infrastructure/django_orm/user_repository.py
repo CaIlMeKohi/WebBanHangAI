@@ -14,7 +14,7 @@ from products.serializers import AuthSerializer, RegisterSerializer, StoreUserSe
 from products.services.email_service import send_registration_otp
 
 
-MAX_FAILED_LOGIN_ATTEMPTS = 3
+MAX_FAILED_LOGIN_ATTEMPTS = 5
 TEMP_LOCK_SECONDS = 30
 
 
@@ -118,7 +118,7 @@ class DjangoOrmUserRepository:
         user = StoreUser.objects.filter(Q(email=username) | Q(phone=username)).first()
         if not user or not user.is_active:
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='inactive_or_missing')
-            raise BusinessRuleViolation('Tai khoan khong hop le hoac da bi khoa')
+            raise BusinessRuleViolation('Dang nhap khong thanh cong!')
         if user.locked_until and user.locked_until > timezone.now():
             remaining_seconds = max(1, int((user.locked_until - timezone.now()).total_seconds()))
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='temporarily_locked')
@@ -131,15 +131,15 @@ class DjangoOrmUserRepository:
             user.failed_login_count = (user.failed_login_count or 0) + 1
             update_fields = ['failed_login_count', 'updated_at']
             reason = 'bad_password'
-            if user.failed_login_count > MAX_FAILED_LOGIN_ATTEMPTS:
+            if user.failed_login_count >= MAX_FAILED_LOGIN_ATTEMPTS:
                 user.locked_until = timezone.now() + timedelta(seconds=TEMP_LOCK_SECONDS)
                 update_fields.append('locked_until')
                 reason = 'temporarily_locked_after_failures'
             user.save(update_fields=update_fields)
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason=reason)
             if user.locked_until and user.locked_until > timezone.now():
-                raise BusinessRuleViolation(f'Sai mat khau qua {MAX_FAILED_LOGIN_ATTEMPTS} lan. Chuc nang dang nhap bi khoa tam thoi {TEMP_LOCK_SECONDS} giay.')
-            raise BusinessRuleViolation('Invalid credentials')
+                raise BusinessRuleViolation(f'Dang nhap sai nhieu lan, bi khoa tam {TEMP_LOCK_SECONDS} giay.')
+            raise BusinessRuleViolation('Dang nhap khong thanh cong!')
 
         user.failed_login_count = 0
         user.locked_until = None

@@ -5,7 +5,7 @@ import { AlertCircle, Lock } from "lucide-react";
 import { useAdminAuth } from "../../context/AdminAuthContext";
 
 function extractLoginLockSeconds(message: string) {
-  const match = message.match(/(?:sau|thoi)\s+(\d+)\s+giay/i);
+  const match = message.match(/(?:sau|thoi|tam)\s+(\d+)\s+giay/i);
   return match ? Number(match[1]) : 0;
 }
 
@@ -50,7 +50,7 @@ export function AdminLogin() {
 
   useEffect(() => {
     if (loginLockSeconds > 0) {
-      setError(`Đăng nhập sai nhiều lần, khóa đăng nhập "${loginLockSeconds}"s.`);
+      setError(`Đăng nhập sai nhiều lần, bị khóa tạm "${loginLockSeconds}" giây.`);
     }
   }, [loginLockSeconds]);
 
@@ -66,9 +66,9 @@ export function AdminLogin() {
         const lockSeconds = extractLoginLockSeconds(result.error ?? "");
         if (lockSeconds > 0) {
           setLoginLockSeconds(lockSeconds);
-          setError(`Đăng nhập sai nhiều lần, khóa đăng nhập "${lockSeconds}"s.`);
+          setError(`Đăng nhập sai nhiều lần, bị khóa tạm "${lockSeconds}" giây.`);
         } else {
-          setError(result.error || "Tên đăng nhập hoặc mật khẩu không chính xác");
+          setError("Đăng nhập không thành công!");
         }
         setPassword("");
       }
