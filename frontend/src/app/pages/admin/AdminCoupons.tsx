@@ -55,6 +55,9 @@ const emptyForm: CouponForm = {
   is_active: true,
 };
 
+const ALL_CATEGORIES_OPTION_ID = "__all__";
+const ALL_CATEGORIES_OPTION_NAME = "Tất cả danh mục, sản phẩm";
+
 function flattenCategories(categories: CategoryNode[]): Array<{ id: number; name: string }> {
   const result: Array<{ id: number; name: string }> = [];
   function visit(items: CategoryNode[], parents: string[] = []) {
@@ -228,7 +231,7 @@ export function AdminCoupons() {
       setMessage("Nhập giá trị giảm, số lượng/giới hạn nếu đã chọn có giới hạn.");
       return;
     }
-    if (categorySearch.trim() && !form.category) {
+    if (categorySearch.trim() && categorySearch !== ALL_CATEGORIES_OPTION_NAME && !form.category) {
       setMessage("Vui lòng chọn một danh mục có trong danh sách gợi ý.");
       return;
     }
@@ -378,8 +381,17 @@ export function AdminCoupons() {
                 value={categorySearch}
                 placeholder="Nhập hoặc chọn danh mục..."
                 label="danh mục"
-                options={flatCategories.map((category) => ({ id: String(category.id), name: category.name }))}
+                options={[
+                  { id: ALL_CATEGORIES_OPTION_ID, name: ALL_CATEGORIES_OPTION_NAME },
+                  ...flatCategories.map((category) => ({ id: String(category.id), name: category.name })),
+                ]}
                 onValueChange={(value, selectedId) => {
+                  if (selectedId === ALL_CATEGORIES_OPTION_ID) {
+                    setCategorySearch(ALL_CATEGORIES_OPTION_NAME);
+                    setProductSearch("");
+                    setForm({ ...form, category: "", product: "" });
+                    return;
+                  }
                   setCategorySearch(value);
                   setProductSearch(selectedId ? "Tất cả sản phẩm trong danh mục" : "");
                   setForm({ ...form, category: selectedId ?? "", product: "" });
@@ -390,9 +402,9 @@ export function AdminCoupons() {
               <span className="mb-1 block text-neutral-600">Sản phẩm áp dụng</span>
               <CouponCombobox
                 value={productSearch}
-                placeholder={form.category ? "Nhập hoặc chọn sản phẩm..." : "Chọn danh mục trước"}
+                placeholder={categorySearch === ALL_CATEGORIES_OPTION_NAME ? "Áp dụng cho tất cả sản phẩm" : form.category ? "Nhập hoặc chọn sản phẩm..." : "Chọn danh mục trước"}
                 label="sản phẩm"
-                disabled={!form.category}
+                disabled={!form.category || categorySearch === ALL_CATEGORIES_OPTION_NAME}
                 options={[
                   { id: "", name: "Tất cả sản phẩm trong danh mục" },
                   ...filteredProducts.map((product) => ({ id: product.id, name: product.name })),
@@ -502,8 +514,9 @@ export function AdminCoupons() {
                       <button className="mr-2 rounded border px-2 py-1" onClick={() => {
                         const nextForm = fromCoupon(coupon);
                         setForm(nextForm);
-                        setCategorySearch(flatCategories.find((category) => String(category.id) === nextForm.category)?.name ?? "");
-                        setProductSearch(nextForm.product ? products.find((product) => product.id === nextForm.product)?.name ?? "" : nextForm.category ? "Tất cả sản phẩm trong danh mục" : "");
+                        const isAllScope = !nextForm.category && !nextForm.product;
+                        setCategorySearch(isAllScope ? ALL_CATEGORIES_OPTION_NAME : flatCategories.find((category) => String(category.id) === nextForm.category)?.name ?? "");
+                        setProductSearch(isAllScope ? "" : nextForm.product ? products.find((product) => product.id === nextForm.product)?.name ?? "" : nextForm.category ? "Tất cả sản phẩm trong danh mục" : "");
                       }}>Sửa</button>
                       <button className="rounded border border-red-200 px-2 py-1 text-red-700" onClick={() => void removeCoupon(coupon)}>Xóa</button>
                     </td>
