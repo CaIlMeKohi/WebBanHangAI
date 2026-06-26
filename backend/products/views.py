@@ -1,6 +1,6 @@
 import secrets
 
-from django.db import models, transaction
+from django.db import DatabaseError, IntegrityError, models, transaction
 from django.utils import timezone
 from rest_framework import generics, status, viewsets
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -430,6 +430,12 @@ class AdminCouponViewSet(viewsets.ModelViewSet):
             },
         )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        try:
+            return super().update(request, *args, **kwargs)
+        except (DatabaseError, IntegrityError) as exc:
+            return Response({'detail': f'Khong the cap nhat coupon: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
 
     def perform_update(self, serializer):
         coupon = self.get_object()

@@ -657,6 +657,13 @@ class CouponSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['coupon_id', 'used_count', 'created_at']
 
+    def validate(self, attrs):
+        start_at = attrs.get('start_at', getattr(self.instance, 'start_at', None))
+        end_at = attrs.get('end_at', getattr(self.instance, 'end_at', None))
+        if start_at and end_at and start_at > end_at:
+            raise serializers.ValidationError({'end_at': 'Ngay ket thuc phai lon hon hoac bang ngay bat dau.'})
+        return attrs
+
 
 class CartItemSerializer(serializers.ModelSerializer):
     product_id = serializers.IntegerField(source='product.product_id', read_only=True)

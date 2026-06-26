@@ -252,6 +252,10 @@ export function AdminCoupons() {
         setMessage("Vui lòng chọn ngày kết thúc.");
         return;
       }
+      if (form.expiry_limit_mode === "end_date" && form.end_at && new Date(form.end_at) < new Date(form.start_at)) {
+        setMessage("Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu.");
+        return;
+      }
       if (form.expiry_limit_mode === "duration" && (!form.duration_days || Number(form.duration_days) <= 0)) {
         setMessage("Vui lòng nhập thời hạn hiệu lực lớn hơn 0 ngày.");
         return;
