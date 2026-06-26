@@ -14,6 +14,10 @@ from products.serializers import AuthSerializer, RegisterSerializer, StoreUserSe
 from products.services.email_service import send_registration_otp
 
 
+MAX_FAILED_LOGIN_ATTEMPTS = 3
+TEMP_LOCK_SECONDS = 30
+
+
 class DjangoOrmUserRepository:
     def logout(self, user, auth) -> None:
         jwt_id = (auth or {}).get('jti')
@@ -109,16 +113,38 @@ class DjangoOrmUserRepository:
 
         username = serializer.validated_data['username'].strip().lower()
         password = serializer.validated_data['password']
-        user = StoreUser.objects.filter(Q(email=username) | Q(phone=username)).first()
         ip_address = request.META.get('REMOTE_ADDR', '')
 
+        user = StoreUser.objects.filter(Q(email=username) | Q(phone=username)).first()
         if not user or not user.is_active:
             LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='inactive_or_missing')
             raise BusinessRuleViolation('Tai khoan khong hop le hoac da bi khoa')
+        if user.locked_until and user.locked_until > timezone.now():
+            remaining_seconds = max(1, int((user.locked_until - timezone.now()).total_seconds()))
+            LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='temporarily_locked')
+            raise BusinessRuleViolation(f'Tai khoan dang bi khoa tam thoi. Vui long thu lai sau {remaining_seconds} giay.')
+        if user.locked_until and user.locked_until <= timezone.now():
+            user.locked_until = None
+            user.failed_login_count = 0
+            user.save(update_fields=['locked_until', 'failed_login_count', 'updated_at'])
         if not check_password(password, user.password_hash):
-            LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason='bad_password')
+            user.failed_login_count = (user.failed_login_count or 0) + 1
+            update_fields = ['failed_login_count', 'updated_at']
+            reason = 'bad_password'
+            if user.failed_login_count > MAX_FAILED_LOGIN_ATTEMPTS:
+                user.locked_until = timezone.now() + timedelta(seconds=TEMP_LOCK_SECONDS)
+                update_fields.append('locked_until')
+                reason = 'temporarily_locked_after_failures'
+            user.save(update_fields=update_fields)
+            LoginLog.objects.create(user=user, identifier=username, success=False, ip_address=ip_address, reason=reason)
+            if user.locked_until and user.locked_until > timezone.now():
+                raise BusinessRuleViolation(f'Sai mat khau qua {MAX_FAILED_LOGIN_ATTEMPTS} lan. Tai khoan bi khoa tam thoi {TEMP_LOCK_SECONDS} giay.')
             raise BusinessRuleViolation('Invalid credentials')
 
+        user.failed_login_count = 0
+        user.locked_until = None
+        user.last_login_at = timezone.now()
+        user.save(update_fields=['failed_login_count', 'locked_until', 'last_login_at', 'updated_at'])
         LoginLog.objects.create(user=user, identifier=username, success=True, ip_address=ip_address)
         return {
             'user': StoreUserSerializer(user).data,
