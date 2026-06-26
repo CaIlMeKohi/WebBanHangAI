@@ -43,7 +43,13 @@ export function AdminLogin() {
   useEffect(() => {
     if (loginLockSeconds <= 0) return;
     const timer = window.setTimeout(() => {
-      setLoginLockSeconds((seconds) => Math.max(0, seconds - 1));
+      setLoginLockSeconds((seconds) => {
+        const nextSeconds = Math.max(0, seconds - 1);
+        if (nextSeconds === 0) {
+          setError("");
+        }
+        return nextSeconds;
+      });
     }, 1000);
     return () => window.clearTimeout(timer);
   }, [loginLockSeconds]);
