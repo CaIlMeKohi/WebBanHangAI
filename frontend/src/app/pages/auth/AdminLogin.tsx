@@ -4,6 +4,11 @@ import { AlertCircle, Lock } from "lucide-react";
 
 import { useAdminAuth } from "../../context/AdminAuthContext";
 
+function extractLoginLockSeconds(message: string) {
+  const match = message.match(/(?:sau|thoi)\s+(\d+)\s+giay/i);
+  return match ? Number(match[1]) : 0;
+}
+
 export function AdminLogin() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -12,6 +17,7 @@ export function AdminLogin() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loginLockSeconds, setLoginLockSeconds] = useState(0);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -34,15 +40,36 @@ export function AdminLogin() {
     }
   }, [isLoggedIn, navigate, role, searchParams, userId]);
 
+  useEffect(() => {
+    if (loginLockSeconds <= 0) return;
+    const timer = window.setTimeout(() => {
+      setLoginLockSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [loginLockSeconds]);
+
+  useEffect(() => {
+    if (loginLockSeconds > 0) {
+      setError(`Đăng nhập sai nhiều lần, khóa đăng nhập "${loginLockSeconds}"s.`);
+    }
+  }, [loginLockSeconds]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginLockSeconds > 0) return;
     setError("");
     setIsLoading(true);
 
     try {
-      const success = await login(username, password);
-      if (!success) {
-        setError("Tên đăng nhập hoặc mật khẩu không chính xác");
+      const result = await login(username, password);
+      if (!result.success) {
+        const lockSeconds = extractLoginLockSeconds(result.error ?? "");
+        if (lockSeconds > 0) {
+          setLoginLockSeconds(lockSeconds);
+          setError(`Đăng nhập sai nhiều lần, khóa đăng nhập "${lockSeconds}"s.`);
+        } else {
+          setError(result.error || "Tên đăng nhập hoặc mật khẩu không chính xác");
+        }
         setPassword("");
       }
     } finally {
@@ -102,10 +129,10 @@ export function AdminLogin() {
 
             <button
               type="submit"
-              disabled={isLoading || !username || !password}
+              disabled={isLoading || loginLockSeconds > 0 || !username || !password}
               className="w-full rounded-lg bg-neutral-900 py-3 font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isLoading ? "Đang đăng nhập..." : "Đăng nhập"}
+              {isLoading ? "Đang đăng nhập..." : loginLockSeconds > 0 ? `Khóa đăng nhập ${loginLockSeconds}s` : "Đăng nhập"}
             </button>
           </form>
 

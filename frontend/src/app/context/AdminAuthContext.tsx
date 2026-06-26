@@ -23,7 +23,7 @@ interface AuthContextType {
   username: string | null;
   role: AuthRole;
   userId: number | null;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (data: {
     username: string;
     password: string;
@@ -145,12 +145,12 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (
     inputUsername: string,
     inputPassword: string,
-  ): Promise<boolean> => {
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await loginUser(inputUsername, inputPassword);
       const apiUser = response.user;
       if (!response.access) {
-        return false;
+        return { success: false };
       }
       applyUser(
         apiUser.username,
@@ -158,12 +158,14 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         apiUser.user_id,
         response.access,
       );
-      return true;
-    } catch {
+      return { success: true };
+    } catch (error) {
       // DB-backed auth is required for cart, wishlist, orders and recommendations.
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Đăng nhập thất bại",
+      };
     }
-
-    return false;
   };
 
   const register = async (data: {
