@@ -205,6 +205,10 @@ function StaffPortalContent() {
   const [shipmentForm, setShipmentForm] = useState<ShipmentForm>({ carrier_name: "", tracking_code: "", note: "" });
   const [shipmentError, setShipmentError] = useState("");
   const [isSavingShipment, setIsSavingShipment] = useState(false);
+  const [cancelOrder, setCancelOrder] = useState<StaffOrder | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [catalogCategories, setCatalogCategories] = useState<CategoryNode[]>([]);
   const [catalogCount, setCatalogCount] = useState(0);
@@ -274,6 +278,13 @@ function StaffPortalContent() {
 
   async function updateOrder(orderId: number, status: OrderStatus) {
     if (updatingOrderId === orderId) return;
+    if (status === "cancelled") {
+      const order = orders.find((item) => item.order_id === orderId) ?? null;
+      setCancelOrder(order);
+      setCancelReason("");
+      setCancelError("");
+      return;
+    }
     if (status === "waiting_pickup") {
       const order = orders.find((item) => item.order_id === orderId) ?? null;
       setShipmentOrder(order);
@@ -286,12 +297,39 @@ function StaffPortalContent() {
     try {
       const body: Record<string, string> = { status };
       await api(`${STAFF_API_BASE}/staff/orders/${orderId}/status`, { method: "PUT", body: JSON.stringify(body) });
-      setMessage(status === "cancelled" ? "Đã hủy đơn hàng" : "Đã cập nhật đơn hàng");
+      setMessage("Đã cập nhật đơn hàng");
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Không thể cập nhật đơn hàng");
     } finally {
       setUpdatingOrderId(null);
+    }
+  }
+
+  async function submitCancelOrder(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!cancelOrder) return;
+    const reason = cancelReason.trim();
+    if (!reason) {
+      setCancelError("Vui lòng nhập lý do hủy đơn.");
+      return;
+    }
+    setIsCancellingOrder(true);
+    setCancelError("");
+    setMessage("");
+    try {
+      await api(`${STAFF_API_BASE}/staff/orders/${cancelOrder.order_id}/status`, {
+        method: "PUT",
+        body: JSON.stringify({ status: "cancelled", note: reason }),
+      });
+      setCancelOrder(null);
+      setCancelReason("");
+      setMessage("Đã hủy đơn hàng");
+      await load();
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : "Không thể hủy đơn hàng.");
+    } finally {
+      setIsCancellingOrder(false);
     }
   }
 
@@ -742,6 +780,71 @@ function StaffPortalContent() {
           }}
           onSubmit={submitShipmentForm}
         />
+      )}
+
+      {cancelOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">Hủy đơn hàng #{cancelOrder.order_id}</h3>
+                <p className="mt-1 text-sm text-neutral-500">Vui lòng nhập lý do hủy đơn trước khi xác nhận.</p>
+              </div>
+              <button
+                type="button"
+                className="rounded border px-3 py-1 text-sm"
+                onClick={() => {
+                  if (isCancellingOrder) return;
+                  setCancelOrder(null);
+                  setCancelReason("");
+                  setCancelError("");
+                }}
+                disabled={isCancellingOrder}
+              >
+                Đóng
+              </button>
+            </div>
+
+            <form className="space-y-4" onSubmit={submitCancelOrder}>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Lý do hủy đơn</span>
+                <textarea
+                  className="min-h-28 w-full rounded border px-3 py-2 outline-none focus:border-neutral-950"
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                  placeholder="Nhập lý do hủy đơn..."
+                  disabled={isCancellingOrder}
+                  required
+                />
+              </label>
+
+              {cancelError && <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{cancelError}</div>}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border px-4 py-2"
+                  onClick={() => {
+                    if (isCancellingOrder) return;
+                    setCancelOrder(null);
+                    setCancelReason("");
+                    setCancelError("");
+                  }}
+                  disabled={isCancellingOrder}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-red-600 px-4 py-2 text-white disabled:opacity-60"
+                  disabled={isCancellingOrder || !cancelReason.trim()}
+                >
+                  {isCancellingOrder ? "Đang hủy..." : "Xác nhận hủy đơn"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {isHistoryOpen && (
