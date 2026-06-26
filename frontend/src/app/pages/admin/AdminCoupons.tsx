@@ -181,6 +181,7 @@ export function AdminCoupons() {
   const [categorySearch, setCategorySearch] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [message, setMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [historyItems, setHistoryItems] = useState<AdminProductHistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -197,18 +198,23 @@ export function AdminCoupons() {
   );
 
   async function load() {
-    const [nextCoupons, nextCategories, nextProducts] = await Promise.all([
-      fetchAdminCoupons(),
-      fetchCategories(),
-      fetchAdminProducts(),
-    ]);
-    setCoupons(nextCoupons);
-    setCategories(nextCategories);
-    setProducts(nextProducts.map((product) => ({
-      id: String(product.id),
-      name: product.name,
-      categoryId: product.category_id ?? null,
-    })));
+    setIsLoading(true);
+    try {
+      const [nextCoupons, nextCategories, nextProducts] = await Promise.all([
+        fetchAdminCoupons(),
+        fetchCategories(),
+        fetchAdminProducts(),
+      ]);
+      setCoupons(nextCoupons);
+      setCategories(nextCategories);
+      setProducts(nextProducts.map((product) => ({
+        id: String(product.id),
+        name: product.name,
+        categoryId: product.category_id ?? null,
+      })));
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -306,6 +312,7 @@ export function AdminCoupons() {
           </button>
         </header>
 
+        {isLoading && <div className="rounded-md border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700">Đang lấy dữ liệu...</div>}
         {message && <div className="rounded-md border bg-white p-3 text-sm text-neutral-700">{message}</div>}
 
         <section className="grid gap-6 lg:grid-cols-[420px_1fr]">
@@ -477,7 +484,12 @@ export function AdminCoupons() {
                 </tr>
               </thead>
               <tbody>
-                {coupons.map((coupon) => (
+                {isLoading && (
+                  <tr>
+                    <td colSpan={8} className="px-2 py-8 text-center text-neutral-500">Đang lấy dữ liệu...</td>
+                  </tr>
+                )}
+                {!isLoading && coupons.map((coupon) => (
                   <tr key={coupon.coupon_id} className="border-t">
                     <td className="px-2 py-3 font-medium">{coupon.code}</td>
                     <td className="px-2 py-3">{coupon.name || "Chưa đặt tên"}</td>
@@ -497,7 +509,7 @@ export function AdminCoupons() {
                     </td>
                   </tr>
                 ))}
-                {!coupons.length && (
+                {!isLoading && !coupons.length && (
                   <tr>
                     <td colSpan={8} className="px-2 py-8 text-neutral-500">Chưa có coupon</td>
                   </tr>
